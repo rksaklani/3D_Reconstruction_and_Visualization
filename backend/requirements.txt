@@ -14,3 +14,6 @@ ultralytics>=8.0.0
 pillow>=10.0.0
 git+https://github.com/facebookresearch/segment-anything.git
 git+https://github.com/openai/CLIP.git
+
+# 3D processing
+open3d>=0.17.0
