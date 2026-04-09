@@ -14,6 +14,14 @@ export const Upload: React.FC = () => {
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  
+  // Configuration state (GS repo path is in backend, not user-configurable)
+  const [config, setConfig] = useState({
+    fps: 2,
+    matcher: 'sequential',
+    overlap: 20,
+    gs_iterations: 30000,
+  });
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -60,12 +68,42 @@ export const Upload: React.FC = () => {
     setUploading(true);
     setError(null);
 
-    const formData = new FormData();
-    files.forEach(file => {
-      formData.append('files', file);
-    });
-
     try {
+      // Get API URL from environment
+      const apiUrl = import.meta.env.VITE_API_URL || '';
+      
+      // Determine input type
+      const inputType = files[0].type.startsWith('video/') ? 'video' : 'images';
+      
+      // Step 1: Create a job with user configuration
+      const createJobResponse = await fetch(`${apiUrl}/api/jobs/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: `Upload ${new Date().toLocaleString()}`,
+          user_id: 'default_user',
+          input_type: inputType,
+          num_files: files.length,
+          config: config,  // User-provided configuration
+        }),
+      });
+
+      if (!createJobResponse.ok) {
+        throw new Error('Failed to create job');
+      }
+
+      const jobData = await createJobResponse.json();
+      const jobId = jobData.job_id;
+
+      // Step 2: Upload files to the job
+      const formData = new FormData();
+      formData.append('job_id', jobId);
+      files.forEach(file => {
+        formData.append('files', file);
+      });
+
       const xhr = new XMLHttpRequest();
 
       xhr.upload.addEventListener('progress', (e) => {
@@ -80,9 +118,8 @@ export const Upload: React.FC = () => {
 
       xhr.addEventListener('load', () => {
         if (xhr.status === 200) {
-          const response = JSON.parse(xhr.responseText);
-          const jobId = response.job_id;
-          navigate(`/processing/${jobId}`);
+          // Navigate to job detail page
+          navigate(`/app/jobs/${jobId}`);
         } else {
           setError(`Upload failed: ${xhr.statusText}`);
           setUploading(false);
@@ -94,7 +131,7 @@ export const Upload: React.FC = () => {
         setUploading(false);
       });
 
-      xhr.open('POST', '/api/upload');
+      xhr.open('POST', `${apiUrl}/api/upload/`);
       xhr.send(formData);
     } catch (err) {
       setError(`Upload failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -109,10 +146,79 @@ export const Upload: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8">Upload Images or Video</h1>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">Upload Images or Video</h2>
+        <p className="text-gray-600 mt-1">Upload your files to start 3D reconstruction</p>
+      </div>
 
+      {/* Configuration Section */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="text-lg font-semibold mb-4">Configuration</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              FPS (Video Frame Rate)
+            </label>
+            <input
+              type="number"
+              value={config.fps}
+              onChange={(e) => setConfig({...config, fps: parseInt(e.target.value) || 2})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              min="1"
+              max="60"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Matcher Type
+            </label>
+            <select
+              value={config.matcher}
+              onChange={(e) => setConfig({...config, matcher: e.target.value})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="sequential">Sequential</option>
+              <option value="exhaustive">Exhaustive</option>
+              <option value="spatial">Spatial</option>
+              <option value="vocab_tree">Vocab Tree</option>
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Overlap (Sequential Matcher)
+            </label>
+            <input
+              type="number"
+              value={config.overlap}
+              onChange={(e) => setConfig({...config, overlap: parseInt(e.target.value) || 20})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              min="1"
+              max="100"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Gaussian Splatting Iterations
+            </label>
+            <input
+              type="number"
+              value={config.gs_iterations}
+              onChange={(e) => setConfig({...config, gs_iterations: parseInt(e.target.value) || 30000})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              min="1000"
+              max="100000"
+              step="1000"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Upload Section */}
+      <div className="bg-white rounded-lg shadow p-6">
         <div
           className={`border-4 border-dashed rounded-lg p-12 text-center transition-colors ${
             isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white'
@@ -187,7 +293,7 @@ export const Upload: React.FC = () => {
         )}
 
         {files.length > 0 && !uploading && (
-          <div className="mt-6 flex justify-end">
+          <div className="flex justify-end">
             <button
               onClick={handleUpload}
               className="px-8 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
@@ -200,3 +306,5 @@ export const Upload: React.FC = () => {
     </div>
   );
 };
+
+export default Upload;

@@ -9,10 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@babylonjs/core": "^9.2.0",
+    "@babylonjs/loaders": "^9.2.0",
+    "axios": "^1.6.7",
+    "lucide-react": "^1.8.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.22.0",
-    "axios": "^1.6.7"
+    "react-router-dom": "^6.30.3",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",

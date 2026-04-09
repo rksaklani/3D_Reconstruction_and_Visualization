@@ -1,96 +1,79 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import {
-  BabylonSceneManager,
-  GaussianRenderer,
-  SceneLoader,
-  MeshRenderer,
-  PhysicsSynchronizer,
-  PhysicsDebugVisualizer,
-  InteractionSystem,
-  CameraController,
-  RenderPipeline
-} from '../../../rendering/splat-renderer/src';
+import * as BABYLON from '@babylonjs/core';
 
 export const Viewer: React.FC = () => {
-  const { jobId } = useParams<{ jobId: string }>();
+  const { id } = useParams<{ id: string }>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [sceneManager, setSceneManager] = useState<BabylonSceneManager | null>(null);
-  const [renderPipeline, setRenderPipeline] = useState<RenderPipeline | null>(null);
-  const [cameraController, setCameraController] = useState<CameraController | null>(null);
-  const [interactionSystem, setInteractionSystem] = useState<InteractionSystem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedObject, setSelectedObject] = useState<{ id: number; label: string } | null>(null);
+  const [renderMode, setRenderMode] = useState<'photorealistic' | 'physics' | 'hybrid'>('photorealistic');
+  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('high');
+  const [cameraMode, setCameraMode] = useState<'orbit' | 'fly'>('orbit');
+  const engineRef = useRef<BABYLON.Engine | null>(null);
+  const sceneRef = useRef<BABYLON.Scene | null>(null);
 
   useEffect(() => {
-    if (!canvasRef.current || !jobId) return;
+    if (!canvasRef.current) return;
 
     const initScene = async () => {
       try {
-        // Initialize Babylon.js scene
-        const manager = new BabylonSceneManager(canvasRef.current!);
-        setSceneManager(manager);
+        // Create Babylon.js engine and scene
+        const engine = new BABYLON.Engine(canvasRef.current!, true);
+        engineRef.current = engine;
 
-        const scene = manager.getScene();
+        const scene = new BABYLON.Scene(engine);
+        sceneRef.current = scene;
 
-        // Load scene data
-        const loader = new SceneLoader();
-        const sceneData = await loader.loadFromMinIO(
-          window.location.origin,
-          '3d-pipeline',
-          jobId
+        // Setup camera
+        const camera = new BABYLON.ArcRotateCamera(
+          'camera',
+          Math.PI / 2,
+          Math.PI / 2,
+          10,
+          BABYLON.Vector3.Zero(),
+          scene
         );
+        camera.attachControl(canvasRef.current!, true);
+        camera.wheelPrecision = 50;
+        camera.minZ = 0.1;
 
-        if (!loader.validateSceneData(sceneData)) {
-          throw new Error('Invalid scene data');
-        }
-
-        // Initialize renderers
-        const gaussianRenderer = new GaussianRenderer(scene);
-        const meshRenderer = new MeshRenderer(scene);
-        const physicsDebug = new PhysicsDebugVisualizer(scene);
-
-        // Load objects
-        for (const obj of sceneData.objects) {
-          if (obj.representationType === 'staticGaussian' && obj.staticRep) {
-            gaussianRenderer.loadGaussians(obj.staticRep.gaussians);
-          } else if (obj.representationType === 'mesh' && obj.meshRep) {
-            meshRenderer.loadMesh(obj);
-          }
-        }
-
-        // Setup physics synchronization
-        const physicsSync = new PhysicsSynchronizer(
-          scene,
-          meshRenderer,
-          `/api/physics/${jobId}`
+        // Setup lighting
+        const light = new BABYLON.HemisphericLight(
+          'light',
+          new BABYLON.Vector3(0, 1, 0),
+          scene
         );
-        physicsSync.startSync();
+        light.intensity = 0.7;
 
-        // Setup interaction
-        const interaction = new InteractionSystem(scene, physicsSync);
-        interaction.onObjectPicked((objectId, label) => {
-          setSelectedObject({ id: objectId, label });
+        // Add demo content
+        const sphere = BABYLON.MeshBuilder.CreateSphere('sphere', { diameter: 2 }, scene);
+        sphere.position.y = 1;
+
+        const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 10, height: 10 }, scene);
+
+        // Materials
+        const sphereMaterial = new BABYLON.StandardMaterial('sphereMat', scene);
+        sphereMaterial.diffuseColor = new BABYLON.Color3(0.4, 0.6, 1);
+        sphere.material = sphereMaterial;
+
+        const groundMaterial = new BABYLON.StandardMaterial('groundMat', scene);
+        groundMaterial.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+        ground.material = groundMaterial;
+
+        // Render loop
+        engine.runRenderLoop(() => {
+          scene.render();
         });
-        setInteractionSystem(interaction);
 
-        // Setup camera controls
-        const camera = new CameraController(scene, canvasRef.current!);
-        setCameraController(camera);
-
-        // Setup render pipeline
-        const pipeline = new RenderPipeline(
-          scene,
-          gaussianRenderer,
-          meshRenderer,
-          physicsDebug
-        );
-        setRenderPipeline(pipeline);
+        // Handle resize
+        window.addEventListener('resize', () => {
+          engine.resize();
+        });
 
         setLoading(false);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load scene');
+        setError(err instanceof Error ? err.message : 'Failed to initialize 3D viewer');
         setLoading(false);
       }
     };
@@ -98,24 +81,36 @@ export const Viewer: React.FC = () => {
     initScene();
 
     return () => {
-      sceneManager?.dispose();
+      sceneRef.current?.dispose();
+      engineRef.current?.dispose();
     };
-  }, [jobId]);
+  }, [id]);
 
   const handleRenderModeChange = (mode: 'photorealistic' | 'physics' | 'hybrid') => {
-    renderPipeline?.setRenderMode(mode);
+    setRenderMode(mode);
+    // TODO: Implement render mode switching
   };
 
-  const handleQualityChange = (quality: 'low' | 'medium' | 'high') => {
-    renderPipeline?.setRenderQuality(quality);
+  const handleQualityChange = (newQuality: 'low' | 'medium' | 'high') => {
+    setQuality(newQuality);
+    // TODO: Implement quality adjustment
   };
 
   const handleCameraModeChange = (mode: 'orbit' | 'fly') => {
-    cameraController?.setMode(mode);
+    setCameraMode(mode);
+    // TODO: Implement camera mode switching
   };
 
   const handleResetCamera = () => {
-    cameraController?.resetCamera();
+    if (sceneRef.current) {
+      const camera = sceneRef.current.activeCamera as BABYLON.ArcRotateCamera;
+      if (camera) {
+        camera.alpha = Math.PI / 2;
+        camera.beta = Math.PI / 2;
+        camera.radius = 10;
+        camera.target = BABYLON.Vector3.Zero();
+      }
+    }
   };
 
   if (loading) {
@@ -194,29 +189,25 @@ export const Viewer: React.FC = () => {
         </button>
       </div>
 
-      {/* Object Inspector */}
-      {selectedObject && (
-        <div className="absolute bottom-4 left-4 bg-gray-800 bg-opacity-90 rounded-lg p-4 text-white w-64">
-          <h3 className="font-bold text-lg mb-2">Selected Object</h3>
-          <p className="text-sm">
-            <span className="text-gray-400">ID:</span> {selectedObject.id}
-          </p>
-          <p className="text-sm">
-            <span className="text-gray-400">Label:</span> {selectedObject.label}
-          </p>
-          <button
-            onClick={() => setSelectedObject(null)}
-            className="mt-3 w-full bg-gray-700 hover:bg-gray-600 rounded px-4 py-2 text-sm"
-          >
-            Deselect
-          </button>
-        </div>
-      )}
+      {/* Info */}
+      <div className="absolute bottom-4 left-4 bg-gray-800 bg-opacity-90 rounded-lg p-4 text-white w-64">
+        <h3 className="font-bold text-lg mb-2">3D Viewer</h3>
+        <p className="text-sm text-gray-300">
+          Model ID: {id || 'demo'}
+        </p>
+        <p className="text-xs text-gray-400 mt-2">
+          Use mouse to rotate, scroll to zoom
+        </p>
+      </div>
 
       {/* Performance Stats */}
       <div className="absolute top-4 left-4 bg-gray-800 bg-opacity-90 rounded-lg p-3 text-white text-sm">
-        <p>FPS: {renderPipeline?.getPerformanceMetrics().fps.toFixed(1) || '0'}</p>
+        <p>Render Mode: {renderMode}</p>
+        <p>Quality: {quality}</p>
+        <p>Camera: {cameraMode}</p>
       </div>
     </div>
   );
 };
+
+export default Viewer;

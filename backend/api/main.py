@@ -49,8 +49,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # React dev server
+        "http://localhost:3001",  # Vite dev server (alternate port)
         "http://localhost:5173",  # Vite dev server
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
         "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
@@ -82,13 +84,14 @@ async def root():
 
 
 # Import and include routers
-from backend.api.routes import jobs, upload, status, download, process
+from backend.api.routes import jobs, upload, status, download, process, config
 
 app.include_router(jobs.router)
 app.include_router(upload.router)
 app.include_router(status.router)
 app.include_router(download.router)
 app.include_router(process.router)
+app.include_router(config.router)
 
 
 if __name__ == "__main__":

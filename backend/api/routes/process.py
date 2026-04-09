@@ -21,6 +21,8 @@ async def start_processing(job_id: str, background_tasks: BackgroundTasks):
     Returns:
         Processing confirmation
     """
+    from datetime import datetime
+    
     db = get_database()
     
     # Get job
@@ -42,9 +44,21 @@ async def start_processing(job_id: str, background_tasks: BackgroundTasks):
             detail=f"Job already {job['status']}"
         )
     
+    # Update status to processing immediately
+    await db.jobs.update_one(
+        {"job_id": job_id},
+        {"$set": {
+            "status": "processing",
+            "stage": "initializing",
+            "progress": 0,
+            "started_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }}
+    )
+    
     # Start processing in background
     pipeline = get_integrated_pipeline()
-    background_tasks.add_task(pipeline.process_job, job_id)
+    background_tasks.add_task(pipeline.process_job_sync, job_id)
     
     logger.info(f"Started processing job: {job_id}")
     

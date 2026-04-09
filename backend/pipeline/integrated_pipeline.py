@@ -61,19 +61,63 @@ class IntegratedPipeline:
             blur_threshold=100.0
         ))
         
-        # Initialize COLMAP
-        self.colmap = get_colmap_service()
+        # Initialize COLMAP (optional - may not be installed)
+        try:
+            self.colmap = get_colmap_service()
+            logger.info("✓ COLMAP service initialized")
+        except Exception as e:
+            self.colmap = None
+            logger.warning(f"COLMAP not available: {e}")
         
-        # Initialize AI services
-        self.detector = YOLODetector()
-        self.segmenter = SAMSegmenter()
-        self.tracker = ObjectTracker()
-        self.classifier = SceneClassifier()
+        # Initialize AI services (lazy-loaded to avoid CUDA errors at startup)
+        self.detector = None
+        self.segmenter = None
+        self.tracker = None
+        self.classifier = None
         
         # Initialize export manager
         self.export_manager = ExportManager(self.config.get('export', {}))
         
         logger.info("✓ Integrated pipeline initialized")
+    
+    def _init_ai_services(self):
+        """Lazy initialization of AI services."""
+        if self.detector is not None:
+            return  # Already initialized
+        
+        try:
+            logger.info("Initializing AI services...")
+            self.detector = YOLODetector()
+            self.segmenter = SAMSegmenter()
+            self.tracker = ObjectTracker()
+            self.classifier = SceneClassifier()
+            logger.info("✓ AI services initialized")
+        except Exception as e:
+            logger.warning(f"AI services not available: {e}")
+            # Create dummy services that return empty results
+            self.detector = None
+            self.segmenter = None
+            self.tracker = None
+            self.classifier = None
+    
+    def process_job_sync(self, job_id: str):
+        """
+        Synchronous wrapper for process_job to run in background tasks.
+        
+        Args:
+            job_id: Job identifier
+        """
+        import asyncio
+        
+        # Create new event loop for background task
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            result = loop.run_until_complete(self.process_job(job_id))
+            return result
+        finally:
+            loop.close()
     
     async def process_job(self, job_id: str) -> Dict:
         """
@@ -157,8 +201,9 @@ class IntegratedPipeline:
         job_id = job['job_id']
         user_id = job['user_id']
         
-        # Download files from MinIO
-        local_dir = Path(f"/tmp/jobs/{job_id}/input")
+        # Use temporary directory for this job (not hardcoded workspace)
+        job_temp_dir = Path(f"/tmp/reconstruction_jobs/{job_id}")
+        local_dir = job_temp_dir / "input"
         local_dir.mkdir(parents=True, exist_ok=True)
         
         image_paths = []
@@ -185,7 +230,7 @@ class IntegratedPipeline:
         images = self.preprocessor.filter_blurry_images(images)
         
         # Save preprocessed images
-        preprocessed_dir = Path(f"/tmp/jobs/{job_id}/preprocessed")
+        preprocessed_dir = job_temp_dir / "preprocessed"
         preprocessed_dir.mkdir(parents=True, exist_ok=True)
         
         for i, (image, metadata) in enumerate(images):
@@ -196,15 +241,30 @@ class IntegratedPipeline:
         return {
             'num_images': len(images),
             'preprocessed_dir': str(preprocessed_dir),
-            'image_paths': [str(preprocessed_dir / f"image_{i:04d}.jpg") for i in range(len(images))]
+            'image_paths': [str(preprocessed_dir / f"image_{i:04d}.jpg") for i in range(len(images))],
+            'temp_dir': str(job_temp_dir)
         }
     
     async def _stage_sfm(self, job: Dict, preprocess_result: Dict) -> Dict:
         """Structure from Motion stage."""
         job_id = job['job_id']
         
-        # Prepare COLMAP workspace
-        workspace_dir = Path(f"/tmp/jobs/{job_id}/colmap")
+        # Check if COLMAP is available
+        if self.colmap is None:
+            logger.warning("COLMAP not available, skipping SfM stage")
+            return {
+                'num_cameras': 0,
+                'num_images': preprocess_result['num_images'],
+                'num_points': 0,
+                'sparse_dir': None,
+                'workspace_dir': None,
+                'skipped': True,
+                'reason': 'COLMAP binary not installed'
+            }
+        
+        # Prepare COLMAP workspace in temp directory
+        job_temp_dir = Path(preprocess_result['temp_dir'])
+        workspace_dir = job_temp_dir / "colmap"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         
         image_dir = Path(preprocess_result['preprocessed_dir'])
@@ -243,7 +303,7 @@ class IntegratedPipeline:
             }
             
         except Exception as e:
-            logger.warning(f"COLMAP failed (binary may not be installed): {e}")
+            logger.warning(f"COLMAP failed: {e}")
             # Return placeholder results
             return {
                 'num_cameras': 0,
@@ -251,13 +311,29 @@ class IntegratedPipeline:
                 'num_points': 0,
                 'sparse_dir': None,
                 'workspace_dir': str(workspace_dir),
-                'error': 'COLMAP binary not available'
+                'error': str(e)
             }
     
     async def _stage_ai_analysis(self, job: Dict, preprocess_result: Dict) -> Dict:
         """AI scene understanding stage."""
         import cv2
         import numpy as np
+        
+        # Initialize AI services (lazy-loaded)
+        self._init_ai_services()
+        
+        # Check if AI services are available
+        if self.detector is None:
+            logger.warning("AI services not available, skipping AI analysis")
+            return {
+                'skipped': True,
+                'reason': 'AI services not available (CUDA/GPU required)',
+                'num_detections': 0,
+                'detections': [],
+                'scene_classification': {},
+                'num_masks': 0,
+                'num_tracks': 0
+            }
         
         image_paths = preprocess_result['image_paths']
         
@@ -337,8 +413,9 @@ class IntegratedPipeline:
         job_id = job['job_id']
         user_id = job['user_id']
         
-        # Create export directory
-        export_dir = Path(f"/tmp/jobs/{job_id}/export")
+        # Create export directory in temp workspace
+        job_temp_dir = Path(f"/tmp/reconstruction_jobs/{job_id}")
+        export_dir = job_temp_dir / "export"
         export_dir.mkdir(parents=True, exist_ok=True)
         
         # Export SfM results (if available)

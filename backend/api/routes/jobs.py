@@ -12,6 +12,7 @@ from backend.api.models.job import (
     JobUpdate,
     JobListResponse
 )
+from backend.config.reconstruction_config import recon_config
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -25,12 +26,19 @@ async def create_job(job_data: JobCreate):
         job_data: Job creation data
         
     Returns:
-        Created job
+        Created job with configuration from .env
     """
     db = get_database()
     
     # Generate job ID
     job_id = str(uuid.uuid4())
+    
+    # Get default configuration from .env
+    default_config = recon_config.get_job_config()
+    
+    # Merge with any custom config provided
+    if job_data.config:
+        default_config.update(job_data.config)
     
     # Create job document
     job_doc = {
@@ -38,7 +46,7 @@ async def create_job(job_data: JobCreate):
         "user_id": job_data.user_id,
         "name": job_data.name,
         "description": job_data.description,
-        "config": job_data.config or {},
+        "config": default_config,  # Configuration from .env
         "status": "created",
         "stage": None,
         "progress": 0.0,
@@ -56,7 +64,7 @@ async def create_job(job_data: JobCreate):
         "log_file": None
     }
     
-    # Insert into database
+    # Insert into MongoDB
     result = await db.jobs.insert_one(job_doc)
     
     # Return response
@@ -234,4 +242,91 @@ async def get_job_stats(job_id: str):
         "duration_seconds": duration,
         "num_files": job["num_files"],
         "stats": job.get("stats", {})
+    }
+
+
+
+@router.get("/{job_id}/log")
+async def get_job_log(
+    job_id: str,
+    tail: int = Query(6000, description="Number of lines to return from end of log")
+):
+    """
+    Get job processing log.
+    
+    Args:
+        job_id: Job identifier
+        tail: Number of lines to return from end
+        
+    Returns:
+        Log content
+    """
+    db = get_database()
+    
+    job = await db.jobs.find_one({"job_id": job_id})
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Check if log file exists
+    log_file = job.get("log_file")
+    
+    if not log_file:
+        # Return empty log if no log file yet
+        return {
+            "job_id": job_id,
+            "log": f"Job created at {job['created_at']}\nStatus: {job['status']}\nNo processing log available yet.",
+            "lines": 3
+        }
+    
+    # TODO: Fetch log from MinIO or local file
+    # For now, return status info
+    log_content = f"""Job: {job['name']}
+ID: {job_id}
+Status: {job['status']}
+Stage: {job.get('stage', 'N/A')}
+Progress: {job['progress']}%
+Created: {job['created_at']}
+Updated: {job['updated_at']}
+
+Configuration:
+{'-' * 50}
+"""
+    
+    # Add config details
+    config = job.get('config', {})
+    for key, value in config.items():
+        log_content += f"{key}: {value}\n"
+    
+    log_content += f"\n{'-' * 50}\n"
+    
+    # Add status messages
+    if job['status'] == 'created':
+        log_content += "\n✓ Job created successfully\n⏳ Waiting for file upload...\n"
+    elif job['status'] == 'uploaded':
+        log_content += f"\n✓ Job created successfully\n✓ {job['num_files']} files uploaded\n⏳ Ready to start processing...\n"
+    elif job['status'] == 'processing':
+        log_content += f"\n✓ Job created successfully\n✓ Files uploaded\n⚙️  Processing in progress...\nStage: {job.get('stage', 'unknown')}\nProgress: {job['progress']}%\n"
+    elif job['status'] == 'completed':
+        log_content += f"\n✓ Job created successfully\n✓ Files uploaded\n✓ Processing completed\n\nResults:\n"
+        output_files = job.get('output_files', {})
+        for key, path in output_files.items():
+            log_content += f"  - {key}: {path}\n"
+    elif job['status'] == 'failed':
+        log_content += f"\n✓ Job created successfully\n✓ Files uploaded\n❌ Processing failed\n\nError: {job.get('error', 'Unknown error')}\n"
+        if job.get('error_details'):
+            log_content += f"\nDetails:\n{job['error_details']}\n"
+    
+    # Add input files info
+    if job.get('input_files'):
+        log_content += f"\nInput Files ({len(job['input_files'])}):\n"
+        for i, file_path in enumerate(job['input_files'][:10], 1):
+            log_content += f"  {i}. {file_path.split('/')[-1]}\n"
+        if len(job['input_files']) > 10:
+            log_content += f"  ... and {len(job['input_files']) - 10} more\n"
+    
+    return {
+        "job_id": job_id,
+        "log": log_content,
+        "lines": len(log_content.split('\n'))
     }
