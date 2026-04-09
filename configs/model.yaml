@@ -1,0 +1,36 @@
+# AI Model Configuration
+
+object_detection:
+  model: "yolov8n"  # yolov8n, yolov8s, yolov8m, yolov8l, yolov8x
+  model_path: "ai/models/yolov8n.pt"
+  confidence_threshold: 0.5
+  iou_threshold: 0.45
+  device: "cuda"  # cuda, cpu
+  batch_size: 8
+
+segmentation:
+  model: "sam_vit_b"  # sam_vit_h, sam_vit_l, sam_vit_b
+  model_path: "ai/models/sam_vit_b.pth"
+  device: "cuda"
+  use_bbox_prompts: true
+
+tracking:
+  iou_threshold: 0.3
+  static_variance_threshold: 0.1  # meters
+  min_track_length: 2
+
+scene_classification:
+  model: "clip_vit_b32"
+  model_path: "ai/models/clip_vit_b32.pt"
+  device: "cuda"
+  scene_types:
+    - "indoor"
+    - "outdoor"
+    - "mixed"
+  room_types:
+    - "living room"
+    - "bedroom"
+    - "kitchen"
+    - "office"
+    - "bathroom"
+    - "other"

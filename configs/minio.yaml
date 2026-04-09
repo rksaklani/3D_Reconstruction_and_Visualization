@@ -1,0 +1,25 @@
+# MinIO Storage Configuration
+
+connection:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  secure: false  # Use HTTPS
+
+bucket:
+  name: "3d-pipeline"
+  region: "us-east-1"
+
+paths:
+  uploads: "uploads"
+  frames: "frames"
+  sparse: "sparse"
+  dense: "dense"
+  ai: "ai"
+  splats: "splats"
+  meshes: "meshes"
+  physics: "physics"
+  exports: "exports"
+
+presigned_url:
+  expiration: 3600  # seconds (1 hour)

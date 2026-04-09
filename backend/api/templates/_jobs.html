@@ -1,0 +1,55 @@
+{% if jobs and jobs|length > 0 %}
+  <div style="display:flex; flex-direction:column; gap:12px;">
+    {% for j in jobs %}
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <div>
+            <div style="font-weight:800;">
+              <a href="/job/{{ j.id }}" style="text-decoration:none;">
+                Job {{ j.id }}
+              </a>
+            </div>
+
+            <div class="muted" style="margin-top:4px;">
+              state={{ j.state }}
+              {% if j.pid %} · pid={{ j.pid }}{% endif %}
+              {% if j.return_code is not none %} · rc={{ j.return_code }}{% endif %}
+            </div>
+
+            <div class="muted" style="margin-top:6px;">
+              <b>workspace:</b> <span style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">{{ j.workspace }}</span>
+            </div>
+            {% if j.video %}
+              <div class="muted">
+                <b>video:</b> <span style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">{{ j.video }}</span>
+              </div>
+            {% endif %}
+            {% if j.images_dir %}
+              <div class="muted">
+                <b>images_dir:</b> <span style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace;">{{ j.images_dir }}</span>
+              </div>
+            {% endif %}
+          </div>
+
+          <div style="display:flex; gap:10px; align-items:center;">
+            <a class="btn" href="/job/{{ j.id }}">Open</a>
+
+            {% if j.state == "running" %}
+              <form method="post" action="/job/{{ j.id }}/stop" style="margin:0;">
+                <button class="btn" type="submit">Stop</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if j.error %}
+          <div style="margin-top:10px; color:#a00; font-size:12px;">
+            {{ j.error }}
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="muted">No jobs yet.</div>
+{% endif %}
