@@ -17,3 +17,6 @@ git+https://github.com/openai/CLIP.git
 
 # 3D processing
 open3d>=0.17.0
+
+# Physics
+pybullet>=3.2.5
