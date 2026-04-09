@@ -1,9 +1,18 @@
 # Gaussian Splatting Configuration
-# 3D Gaussian Splatting training and rendering parameters
+# 3D Gaussian representation and training parameters
 
-# Model Initialization
-initialization:
-  num_points: 100000  # Initial number of Gaussians (from sparse point cloud)
+model:
+  sh_degree: 3  # Spherical harmonics degree (0-3)
+  source_path: ""  # Will be set dynamically
+  model_path: ""  # Will be set dynamically
+  images: "images"
+  resolution: -1  # -1 for original resolution
+  white_background: false
+  data_device: "cuda"
+  eval: false
+
+optimization:
+  iterations: 30000
   position_lr_init: 0.00016
   position_lr_final: 0.0000016
   position_lr_delay_mult: 0.01
@@ -14,121 +23,74 @@ initialization:
   scaling_lr: 0.005
   rotation_lr: 0.001
   
-  # Initial parameter ranges
-  opacity_init: 0.1
-  scale_init: 1.0
-  rotation_init: [1.0, 0.0, 0.0, 0.0]  # Quaternion (w, x, y, z)
-
-# Spherical Harmonics
-spherical_harmonics:
-  degree: 3  # SH degree (0-3, higher = more view-dependent color)
-  sh_lr: 0.0025
-
-# Training
-training:
-  iterations: 30000
-  batch_size: 1
-  
-  # Loss weights
-  lambda_dssim: 0.2  # SSIM loss weight
-  lambda_l1: 0.8     # L1 loss weight
-  
-  # Densification
-  densify_from_iter: 500
-  densify_until_iter: 15000
+  percent_dense: 0.01
+  lambda_dssim: 0.2
   densification_interval: 100
   opacity_reset_interval: 3000
-  
+  densify_from_iter: 500
+  densify_until_iter: 15000
   densify_grad_threshold: 0.0002
-  densify_size_threshold: 0.01  # Screen-space size threshold
   
   # Pruning
-  prune_opacity_threshold: 0.005
-  prune_scale_threshold: 0.1
+  prune_from_iter: 500
+  prune_until_iter: 15000
   prune_interval: 100
-  
-  # Adaptive density control
-  percent_dense: 0.01
-  
-  # Checkpointing
-  checkpoint_interval: 5000
-  save_iterations: [7000, 15000, 30000]
+  opacity_cull_threshold: 0.005
+  size_threshold: 20  # Max Gaussian size in pixels
 
-# Rendering
 rendering:
-  # Rasterization
-  image_height: 1080
-  image_width: 1920
-  fov_y: 45.0  # Field of view in degrees
+  # Rasterization settings
+  compute_cov3D_python: false
+  convert_SHs_python: false
+  debug: false
   
-  # Splatting
-  scaling_modifier: 1.0
-  
-  # Culling
-  near_plane: 0.01
-  far_plane: 100.0
-  
-  # Quality
+  # Anti-aliasing
   antialiasing: true
   
-  # Performance
-  tile_size: 16  # Tile-based rendering
-  max_gaussians_per_tile: 1024
+  # Depth rendering
+  render_depth: true
+  depth_ratio: 1.0
 
-# Optimization
-optimization:
-  # Gradient clipping
-  gradient_clip: 1.0
-  
-  # Regularization
-  opacity_regularization: 0.0
-  scale_regularization: 0.0
-  
-  # Convergence
-  convergence_threshold: 0.0001
-  patience: 5  # Early stopping patience
-
-# Data
-data:
-  # Image preprocessing
-  resolution: -1  # -1 = use original resolution
-  white_background: false
+training:
+  test_iterations: [7000, 30000]
+  save_iterations: [7000, 30000]
+  checkpoint_iterations: [7000, 15000, 30000]
+  quiet: false
   
   # Data loading
-  shuffle: true
-  num_workers: 4
+  random_background: false
   
   # Validation
-  eval_interval: 1000
-  test_iterations: [7000, 15000, 30000]
+  eval_split: 0.1  # 10% for validation
 
-# Export
-export:
-  # PLY export
-  ply_format: "binary"  # "ascii" or "binary"
+dynamic:
+  # Dynamic Gaussian parameters
+  enable: false
+  time_steps: 100
+  velocity_lr: 0.001
+  acceleration_lr: 0.0001
+  deformation_lr: 0.001
   
-  # Splat export
-  include_sh: true
+  # Temporal consistency
+  temporal_smoothness_weight: 0.1
+  motion_prior_weight: 0.05
+
+export:
+  # Export settings
+  ply_format: "binary"  # binary or ascii
+  include_normals: true
+  include_colors: true
   include_opacity: true
   include_scale: true
   include_rotation: true
   
-  # Compression
-  compress: false
-  quantize_positions: false
-  quantize_colors: false
+  # Mesh conversion
+  mesh_resolution: 512
+  mesh_threshold: 0.01
+  mesh_decimate_target: 100000  # Target triangle count
 
-# Advanced
-advanced:
-  # Covariance computation
-  compute_cov3d_python: false  # Use CUDA if false
-  
-  # Debug
-  debug: false
-  visualize_training: false
-  
-  # Memory
-  max_memory_mb: 8192  # Maximum GPU memory usage
-  
-  # Precision
-  use_fp16: false  # Half precision training
+gpu:
+  device: "cuda:0"
+  allow_tf32: true
+  cudnn_benchmark: true
+  num_workers: 4

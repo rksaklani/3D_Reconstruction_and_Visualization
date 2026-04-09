@@ -1,0 +1,55 @@
+version: '3.8'
+
+# Development-specific overrides
+services:
+  backend:
+    command: uvicorn backend.api.server:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ../backend:/app/backend:delegated
+      - ../ai:/app/ai:delegated
+      - ../configs:/app/configs:delegated
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+
+  frontend:
+    command: npm run dev -- --host 0.0.0.0
+    volumes:
+      - ../frontend/src:/app/src:delegated
+      - ../frontend/public:/app/public:delegated
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - NODE_ENV=development
+
+  worker:
+    command: celery -A backend.workers.queue worker --loglevel=debug --concurrency=2
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+
+  # Development tools
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    ports:
+      - "8080:8080"
+    networks:
+      - 3d-recon-network
+    depends_on:
+      - postgres
+
+  # Flower for Celery monitoring
+  flower:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    container_name: flower
+    command: celery -A backend.workers.queue flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - 3d-recon-network
+    depends_on:
+      - redis

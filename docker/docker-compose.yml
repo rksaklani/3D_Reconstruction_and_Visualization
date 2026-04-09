@@ -24,12 +24,32 @@ services:
       retries: 3
       start_period: 5s
 
+  # MongoDB (for job storage)
+  mongodb:
+    image: mongo:7
+    container_name: 3d-recon-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: reconstruction
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - 3d-recon-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   # Redis (for Celery task queue)
   redis:
     image: redis:7-alpine
     container_name: 3d-recon-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis-data:/data
     networks:
@@ -110,4 +130,5 @@ networks:
 
 volumes:
   minio-data:
+  mongodb-data:
   redis-data:

@@ -1,209 +1,119 @@
 # Physics Engine Configuration
-# Bullet Physics / PyBullet parameters for interactive 3D scenes
+# PyBullet physics simulation parameters
 
-# Engine Settings
 engine:
-  type: "bullet"  # "bullet" or "ammo" (for web)
-  gravity: [0.0, -9.81, 0.0]  # m/s^2 (x, y, z)
-  time_step: 0.016667  # 1/60 seconds (60 FPS)
-  max_sub_steps: 10
-  fixed_time_step: 0.016667
+  backend: "pybullet"  # pybullet, mujoco (future)
+  gui: false
+  real_time: false
+  time_step: 0.01  # 100 Hz
+  num_solver_iterations: 50
   
-  # Solver
-  solver_iterations: 10
-  solver_type: "sequential_impulse"  # "sequential_impulse" or "nncg"
-  
-  # Performance
-  use_split_impulse: true
-  split_impulse_penetration_threshold: -0.04
-  enable_sleeping: true
-  sleep_threshold: 0.1
+gravity:
+  x: 0.0
+  y: 0.0
+  z: -9.81
 
-# Collision Detection
-collision:
-  # Broad phase
-  broad_phase_algorithm: "dynamic_aabb_tree"  # "dynamic_aabb_tree", "axis_sweep_3", "dbvt"
-  
-  # Narrow phase
-  collision_margin: 0.001  # meters
-  contact_breaking_threshold: 0.02
-  
-  # Contact processing
-  contact_erp: 0.2  # Error reduction parameter
-  contact_cfm: 0.0  # Constraint force mixing
-  
-  # Collision filtering
-  enable_collision_filtering: true
-  
-  # Performance
-  max_contacts_per_body: 4
-  use_continuous_collision_detection: false
-
-# Rigid Bodies
-rigid_bodies:
-  # Default properties
-  default_mass: 1.0  # kg
-  default_friction: 0.5
-  default_restitution: 0.3  # Bounciness (0-1)
-  default_linear_damping: 0.04
-  default_angular_damping: 0.1
-  
-  # Mass calculation
-  auto_calculate_mass: true  # Calculate from volume and density
-  default_density: 1000.0  # kg/m^3 (water density)
-  
-  # Constraints
-  max_linear_velocity: 100.0  # m/s
-  max_angular_velocity: 100.0  # rad/s
-  
-  # Static objects
-  static_friction: 0.7
-  static_restitution: 0.1
-
-# Collision Meshes
-collision_meshes:
-  # Simplification
-  simplify_meshes: true
-  target_triangle_count: 1000
-  max_triangle_count: 5000
-  
-  # Convex decomposition
-  use_convex_decomposition: true
-  max_convex_hulls: 32
-  resolution: 100000
-  max_vertices_per_hull: 64
-  
-  # Primitive shapes (faster)
-  use_primitives_when_possible: true
-  primitive_threshold: 0.9  # Similarity threshold
-  
-  # Bounding volumes
-  use_aabb: false  # Axis-aligned bounding box
-  use_obb: false   # Oriented bounding box
-  use_sphere: false
-  use_capsule: false
-
-# Object Classification
-object_types:
-  # Static objects (infinite mass, no movement)
-  static:
-    mass: 0.0
-    friction: 0.7
-    restitution: 0.1
-    can_sleep: false
-    
-  # Dynamic objects (affected by forces)
-  dynamic:
-    mass: 1.0
-    friction: 0.5
-    restitution: 0.3
-    can_sleep: true
-    
-  # Kinematic objects (controlled by animation)
-  kinematic:
-    mass: 0.0
-    friction: 0.5
-    restitution: 0.3
-    can_sleep: false
-    is_kinematic: true
-
-# Material Properties
-materials:
-  wood:
-    density: 600.0  # kg/m^3
-    friction: 0.6
-    restitution: 0.4
-    
-  metal:
-    density: 7850.0  # kg/m^3 (steel)
-    friction: 0.4
-    restitution: 0.2
-    
-  plastic:
-    density: 950.0  # kg/m^3
-    friction: 0.5
-    restitution: 0.5
-    
-  rubber:
-    density: 1100.0  # kg/m^3
-    friction: 0.9
-    restitution: 0.8
-    
-  glass:
-    density: 2500.0  # kg/m^3
-    friction: 0.3
-    restitution: 0.1
-    
-  concrete:
-    density: 2400.0  # kg/m^3
-    friction: 0.7
-    restitution: 0.1
-
-# Constraints
-constraints:
-  # Joint limits
-  enable_joint_limits: true
-  joint_limit_softness: 0.9
-  joint_limit_bias_factor: 0.3
-  joint_limit_relaxation_factor: 1.0
-  
-  # Motors
-  max_motor_impulse: 1000.0
-
-# Forces
-forces:
-  # User interaction
-  max_user_force: 100.0  # Newtons
-  max_user_torque: 10.0  # Newton-meters
-  
-  # Drag force
-  enable_drag: true
-  drag_coefficient: 0.47  # Sphere
-  air_density: 1.225  # kg/m^3
-
-# Simulation
 simulation:
-  # Stability
-  enable_stabilization: true
-  stabilization_threshold: 0.001
+  max_steps: 1000
+  substeps: 1
+  enable_cone_friction: true
+  deterministic_overlapping_pairs: true
   
-  # Warm starting
-  enable_warm_starting: true
+  # Collision detection
+  collision_filter_mode: 1
+  enable_sat: false
+  enable_file_caching: true
   
-  # Error correction
-  max_penetration_recovery: 0.2
-  
-  # Performance
-  parallel_processing: true
-  num_threads: -1  # -1 = use all available cores
+  # Contact parameters
+  contact_breaking_threshold: 0.001
+  contact_slop: 0.0
+  enable_sleeping: true
+  sleep_threshold_linear: 0.01
+  sleep_threshold_angular: 0.01
 
-# Debug Visualization
+objects:
+  # Default object properties
+  default_mass: 1.0
+  default_friction: 0.5
+  default_restitution: 0.3
+  default_linear_damping: 0.04
+  default_angular_damping: 0.04
+  
+  # Dynamic vs static classification
+  static_threshold:
+    velocity: 0.01  # m/s
+    angular_velocity: 0.01  # rad/s
+    duration: 1.0  # seconds
+  
+  # Object categories
+  categories:
+    rigid:
+      mass_range: [0.1, 100.0]
+      friction: 0.5
+      restitution: 0.3
+    
+    soft:
+      enable: false  # Soft body physics (future)
+      stiffness: 1000.0
+      damping: 0.1
+    
+    fluid:
+      enable: false  # Fluid simulation (future)
+      viscosity: 0.001
+
+constraints:
+  # Joint constraints
+  enable_joints: true
+  joint_damping: 0.1
+  joint_friction: 0.0
+  
+  # Constraint solver
+  erp: 0.2  # Error reduction parameter
+  contact_erp: 0.2
+  friction_erp: 0.2
+  
+  # Split impulse
+  split_impulse: true
+  split_impulse_penetration_threshold: -0.04
+
+validation:
+  # Physics validation
+  check_penetration: true
+  max_penetration_depth: 0.01
+  check_stability: true
+  stability_threshold: 0.1
+  
+  # Plausibility checks
+  max_velocity: 50.0  # m/s
+  max_angular_velocity: 100.0  # rad/s
+  max_acceleration: 100.0  # m/s²
+
+optimization:
+  # Physics-based optimization
+  enable: true
+  max_iterations: 100
+  convergence_threshold: 0.001
+  
+  # Trajectory optimization
+  trajectory_smoothness_weight: 0.1
+  physics_consistency_weight: 1.0
+  observation_weight: 1.0
+
+export:
+  # Export physics data
+  save_trajectories: true
+  save_contacts: true
+  save_forces: false
+  trajectory_format: "json"  # json, csv, npz
+  
+  # Visualization
+  visualize_contacts: false
+  visualize_forces: false
+  visualize_trajectories: true
+
 debug:
-  enable_debug_draw: false
-  draw_wireframe: true
-  draw_aabb: false
-  draw_contact_points: true
-  draw_contact_normals: true
-  draw_constraints: true
-  draw_constraint_limits: true
-  
-  # Colors (RGBA)
-  color_active: [1.0, 1.0, 1.0, 1.0]
-  color_deactivated: [0.5, 0.5, 0.5, 1.0]
-  color_sleeping: [0.3, 0.3, 0.3, 1.0]
-  color_contact_point: [1.0, 0.0, 0.0, 1.0]
-
-# Advanced
-advanced:
-  # Determinism
-  deterministic: false  # Sacrifice performance for determinism
-  
-  # Precision
-  use_double_precision: false
-  
-  # Memory
-  max_rigid_bodies: 10000
-  max_constraints: 10000
-  
-  # Profiling
-  enable_profiling: false
+  verbose: false
+  log_collisions: false
+  log_constraints: false
+  visualize_aabb: false
+  visualize_wireframe: false

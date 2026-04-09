@@ -9,11 +9,12 @@ const api = axios.create({
 
 export const jobsApi = {
   getJobs: () => api.get('/jobs'),
-  getJob: (jobId) => api.get(`/job/${jobId}`),
-  getJobLog: (jobId, tail = 6000) => api.get(`/job/${jobId}/log?tail=${tail}`),
-  stopJob: (jobId) => api.post(`/job/${jobId}/stop`),
-  createJob: (formData) => api.post('/run', formData, {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  getJob: (jobId) => api.get(`/jobs/${jobId}`),
+  getJobLog: (jobId, tail = 6000) => api.get(`/jobs/${jobId}/log?tail=${tail}`),
+  stopJob: (jobId) => api.post(`/process/${jobId}/stop`),
+  startProcessing: (jobId) => api.post(`/process/${jobId}/start`),
+  createJob: (formData) => api.post('/jobs', formData, {
+    headers: { 'Content-Type': 'application/json' }
   }),
 }
 

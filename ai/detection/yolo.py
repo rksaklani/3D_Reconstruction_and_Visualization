@@ -1,6 +1,8 @@
 """YOLOv8 object detection service."""
 
+import cv2
 import numpy as np
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import logging
@@ -10,7 +12,7 @@ try:
     YOLO_AVAILABLE = True
 except ImportError:
     YOLO_AVAILABLE = False
-    logging.warning("ultralytics not installed. YOLOv8 detection will not be available.")
+    logging.warning("Ultralytics not available. YOLO detection will be disabled.")
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +20,20 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Detection:
     """Object detection result."""
-    label: str
-    confidence: float
-    bbox: Tuple[float, float, float, float]  # (x1, y1, x2, y2)
     class_id: int
+    class_name: str
+    confidence: float
+    bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2
+    mask: Optional[np.ndarray] = None  # Segmentation mask if available
+
+
+@dataclass
+class DetectionResult:
+    """Detection results for an image."""
+    image_path: str
+    detections: List[Detection]
+    num_detections: int
+    inference_time: float  # milliseconds
 
 
 class YOLODetector:
@@ -29,8 +41,8 @@ class YOLODetector:
     
     def __init__(
         self,
-        model_path: str = "yolov8n.pt",
-        confidence_threshold: float = 0.5,
+        model_path: Optional[str] = None,
+        confidence_threshold: float = 0.25,
         iou_threshold: float = 0.45,
         device: str = "cuda:0"
     ):
@@ -38,250 +50,308 @@ class YOLODetector:
         Initialize YOLO detector.
         
         Args:
-            model_path: Path to YOLO model weights
+            model_path: Path to YOLO model weights (uses yolov8n.pt if None)
             confidence_threshold: Minimum confidence for detections
             iou_threshold: IoU threshold for NMS
-            device: Device to run inference on ('cuda:0', 'cpu')
+            device: Device to run inference on
         """
         if not YOLO_AVAILABLE:
-            raise ImportError("ultralytics package not installed. Install with: pip install ultralytics")
+            raise RuntimeError("Ultralytics not installed. Install with: pip install ultralytics")
         
         self.confidence_threshold = confidence_threshold
         self.iou_threshold = iou_threshold
         self.device = device
         
+        # Load model
+        if model_path is None:
+            # Use default YOLOv8n model (will auto-download)
+            model_path = "yolov8n.pt"
+            logger.info("Using default YOLOv8n model")
+        
         try:
             self.model = YOLO(model_path)
             self.model.to(device)
-            logger.info(f"Loaded YOLO model: {model_path} on {device}")
+            logger.info(f"Loaded YOLO model from {model_path}")
         except Exception as e:
-            logger.error(f"Failed to load YOLO model: {e}")
-            raise
+            raise RuntimeError(f"Failed to load YOLO model: {e}")
+        
+        # Get class names
+        self.class_names = self.model.names
     
     def detect(
         self,
         image: np.ndarray,
-        confidence_threshold: Optional[float] = None
-    ) -> List[Detection]:
+        image_path: Optional[str] = None
+    ) -> DetectionResult:
         """
-        Detect objects in a single image.
+        Detect objects in an image.
         
         Args:
             image: Input image (BGR format)
-            confidence_threshold: Override default confidence threshold
+            image_path: Optional path for metadata
             
         Returns:
-            List of detections
+            Detection result
         """
-        conf_thresh = confidence_threshold if confidence_threshold is not None else self.confidence_threshold
+        import time
+        start_time = time.time()
         
-        try:
-            # Run inference
-            results = self.model(
-                image,
-                conf=conf_thresh,
-                iou=self.iou_threshold,
-                verbose=False
-            )
+        # Run inference
+        results = self.model.predict(
+            image,
+            conf=self.confidence_threshold,
+            iou=self.iou_threshold,
+            verbose=False
+        )
+        
+        inference_time = (time.time() - start_time) * 1000  # Convert to ms
+        
+        # Parse results
+        detections = []
+        
+        if len(results) > 0:
+            result = results[0]
+            boxes = result.boxes
             
-            # Parse results
-            detections = []
-            
-            for result in results:
-                boxes = result.boxes
+            for i in range(len(boxes)):
+                box = boxes[i]
                 
-                for i in range(len(boxes)):
-                    # Extract box data
-                    box = boxes.xyxy[i].cpu().numpy()  # [x1, y1, x2, y2]
-                    conf = float(boxes.conf[i].cpu().numpy())
-                    cls = int(boxes.cls[i].cpu().numpy())
-                    label = result.names[cls]
-                    
-                    # Validate bbox
-                    if box[2] > box[0] and box[3] > box[1]:
-                        detection = Detection(
-                            label=label,
-                            confidence=conf,
-                            bbox=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
-                            class_id=cls
-                        )
-                        detections.append(detection)
-            
-            logger.debug(f"Detected {len(detections)} objects")
-            return detections
-            
-        except Exception as e:
-            logger.error(f"Detection failed: {e}")
-            return []
+                # Get bounding box coordinates
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+                
+                # Get class and confidence
+                class_id = int(box.cls[0])
+                confidence = float(box.conf[0])
+                class_name = self.class_names[class_id]
+                
+                # Get mask if available (for instance segmentation)
+                mask = None
+                if hasattr(result, 'masks') and result.masks is not None:
+                    mask = result.masks[i].data.cpu().numpy()
+                
+                detection = Detection(
+                    class_id=class_id,
+                    class_name=class_name,
+                    confidence=confidence,
+                    bbox=(x1, y1, x2, y2),
+                    mask=mask
+                )
+                
+                detections.append(detection)
+        
+        return DetectionResult(
+            image_path=image_path or "unknown",
+            detections=detections,
+            num_detections=len(detections),
+            inference_time=inference_time
+        )
     
     def detect_batch(
         self,
         images: List[np.ndarray],
-        confidence_threshold: Optional[float] = None,
-        fallback_to_full_scene: bool = True
-    ) -> List[List[Detection]]:
+        image_paths: Optional[List[str]] = None
+    ) -> List[DetectionResult]:
         """
-        Detect objects in multiple images (batch processing).
+        Detect objects in multiple images.
         
         Args:
             images: List of input images
-            confidence_threshold: Override default confidence threshold
-            fallback_to_full_scene: If True, enable full-scene reconstruction when no objects detected
+            image_paths: Optional list of paths for metadata
             
         Returns:
-            List of detection lists (one per image)
+            List of detection results
         """
-        conf_thresh = confidence_threshold if confidence_threshold is not None else self.confidence_threshold
+        if image_paths is None:
+            image_paths = [f"image_{i}" for i in range(len(images))]
         
-        try:
-            # Run batch inference
-            results = self.model(
-                images,
-                conf=conf_thresh,
-                iou=self.iou_threshold,
-                verbose=False
-            )
-            
-            # Parse results for each image
-            all_detections = []
-            images_with_no_detections = 0
-            
-            for idx, result in enumerate(results):
-                detections = []
-                boxes = result.boxes
-                
-                for i in range(len(boxes)):
-                    box = boxes.xyxy[i].cpu().numpy()
-                    conf = float(boxes.conf[i].cpu().numpy())
-                    cls = int(boxes.cls[i].cpu().numpy())
-                    label = result.names[cls]
-                    
-                    if box[2] > box[0] and box[3] > box[1]:
-                        detection = Detection(
-                            label=label,
-                            confidence=conf,
-                            bbox=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
-                            class_id=cls
-                        )
-                        detections.append(detection)
-                
-                # Handle edge case: no objects detected
-                if len(detections) == 0:
-                    images_with_no_detections += 1
-                    logger.warning(f"No objects detected in image {idx} with confidence >= {conf_thresh}")
-                    
-                    if fallback_to_full_scene:
-                        logger.info(f"Fallback enabled: Will reconstruct full scene for image {idx}")
-                
-                all_detections.append(detections)
-            
-            # Log summary
-            total_detections = sum(len(d) for d in all_detections)
-            logger.info(f"Batch detection complete: {len(images)} images, {total_detections} total detections")
-            
-            if images_with_no_detections > 0:
-                logger.warning(f"{images_with_no_detections}/{len(images)} images had no detections")
-                
-                # Suggest lowering threshold if many images have no detections
-                if images_with_no_detections > len(images) * 0.5:
-                    suggested_threshold = max(0.3, conf_thresh - 0.1)
-                    logger.info(f"Consider lowering confidence threshold to {suggested_threshold:.2f}")
-            
-            return all_detections
-            
-        except Exception as e:
-            logger.error(f"Batch detection failed: {e}")
-            return [[] for _ in images]
+        results = []
+        
+        for i, image in enumerate(images):
+            result = self.detect(image, image_paths[i])
+            results.append(result)
+        
+        return results
     
-    def validate_detection(self, detection: Detection) -> bool:
+    def detect_from_file(self, image_path: str) -> DetectionResult:
         """
-        Validate detection parameters.
+        Detect objects from image file.
         
         Args:
-            detection: Detection to validate
+            image_path: Path to image file
             
         Returns:
-            True if valid
+            Detection result
         """
-        # Check confidence in [0, 1]
-        if not 0.0 <= detection.confidence <= 1.0:
-            return False
+        image = cv2.imread(image_path)
         
-        # Check bbox dimensions are positive
-        x1, y1, x2, y2 = detection.bbox
-        if x2 <= x1 or y2 <= y1:
-            return False
+        if image is None:
+            raise ValueError(f"Failed to load image: {image_path}")
         
-        return True
+        return self.detect(image, image_path)
+    
+    def visualize(
+        self,
+        image: np.ndarray,
+        detections: List[Detection],
+        show_labels: bool = True,
+        show_confidence: bool = True
+    ) -> np.ndarray:
+        """
+        Visualize detections on image.
+        
+        Args:
+            image: Input image
+            detections: List of detections
+            show_labels: Show class labels
+            show_confidence: Show confidence scores
+            
+        Returns:
+            Image with visualized detections
+        """
+        vis_image = image.copy()
+        
+        for det in detections:
+            x1, y1, x2, y2 = det.bbox
+            
+            # Draw bounding box
+            color = self._get_color(det.class_id)
+            cv2.rectangle(vis_image, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw label
+            if show_labels or show_confidence:
+                label_parts = []
+                if show_labels:
+                    label_parts.append(det.class_name)
+                if show_confidence:
+                    label_parts.append(f"{det.confidence:.2f}")
+                
+                label = " ".join(label_parts)
+                
+                # Draw label background
+                (label_w, label_h), _ = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+                )
+                cv2.rectangle(
+                    vis_image,
+                    (x1, y1 - label_h - 10),
+                    (x1 + label_w, y1),
+                    color,
+                    -1
+                )
+                
+                # Draw label text
+                cv2.putText(
+                    vis_image,
+                    label,
+                    (x1, y1 - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 255),
+                    1
+                )
+        
+        return vis_image
+    
+    def filter_by_class(
+        self,
+        detections: List[Detection],
+        class_names: List[str]
+    ) -> List[Detection]:
+        """
+        Filter detections by class names.
+        
+        Args:
+            detections: List of detections
+            class_names: List of class names to keep
+            
+        Returns:
+            Filtered detections
+        """
+        return [d for d in detections if d.class_name in class_names]
     
     def filter_by_confidence(
         self,
         detections: List[Detection],
         min_confidence: float
     ) -> List[Detection]:
-        """Filter detections by confidence threshold."""
+        """
+        Filter detections by confidence threshold.
+        
+        Args:
+            detections: List of detections
+            min_confidence: Minimum confidence
+            
+        Returns:
+            Filtered detections
+        """
         return [d for d in detections if d.confidence >= min_confidence]
-    
-    def filter_by_labels(
-        self,
-        detections: List[Detection],
-        labels: List[str]
-    ) -> List[Detection]:
-        """Filter detections by label."""
-        return [d for d in detections if d.label in labels]
     
     def get_detection_stats(
         self,
-        detections: List[Detection]
+        results: List[DetectionResult]
     ) -> Dict[str, Any]:
-        """Get statistics about detections."""
-        if not detections:
-            return {
-                'num_detections': 0,
-                'labels': [],
-                'mean_confidence': 0.0
-            }
+        """
+        Get statistics from detection results.
         
-        labels = [d.label for d in detections]
-        confidences = [d.confidence for d in detections]
+        Args:
+            results: List of detection results
+            
+        Returns:
+            Statistics dictionary
+        """
+        total_detections = sum(r.num_detections for r in results)
+        avg_inference_time = np.mean([r.inference_time for r in results])
+        
+        # Count detections per class
+        class_counts = {}
+        for result in results:
+            for det in result.detections:
+                class_counts[det.class_name] = class_counts.get(det.class_name, 0) + 1
         
         return {
-            'num_detections': len(detections),
-            'labels': list(set(labels)),
-            'label_counts': {label: labels.count(label) for label in set(labels)},
-            'mean_confidence': float(np.mean(confidences)),
-            'min_confidence': float(np.min(confidences)),
-            'max_confidence': float(np.max(confidences))
+            'total_images': len(results),
+            'total_detections': total_detections,
+            'avg_detections_per_image': total_detections / len(results) if results else 0,
+            'avg_inference_time_ms': avg_inference_time,
+            'class_counts': class_counts,
+            'unique_classes': len(class_counts)
         }
+    
+    def _get_color(self, class_id: int) -> Tuple[int, int, int]:
+        """Get color for class ID."""
+        # Generate consistent color based on class ID
+        np.random.seed(class_id)
+        color = tuple(np.random.randint(0, 255, 3).tolist())
+        return color
 
 
-def download_yolo_model(model_name: str = "yolov8n.pt", save_dir: str = "ai/models") -> str:
+# Global detector instance
+_detector: Optional[YOLODetector] = None
+
+
+def get_detector(
+    model_path: Optional[str] = None,
+    confidence_threshold: float = 0.25,
+    device: str = "cuda:0"
+) -> YOLODetector:
     """
-    Download YOLO model weights.
+    Get or create global YOLO detector instance.
     
     Args:
-        model_name: Model name (yolov8n, yolov8s, yolov8m, yolov8l, yolov8x)
-        save_dir: Directory to save model
+        model_path: Path to model weights
+        confidence_threshold: Confidence threshold
+        device: Device to use
         
     Returns:
-        Path to downloaded model
+        YOLODetector instance
     """
-    from pathlib import Path
+    global _detector
     
-    save_path = Path(save_dir)
-    save_path.mkdir(parents=True, exist_ok=True)
+    if _detector is None:
+        _detector = YOLODetector(
+            model_path=model_path,
+            confidence_threshold=confidence_threshold,
+            device=device
+        )
     
-    model_path = save_path / model_name
-    
-    if model_path.exists():
-        logger.info(f"Model already exists: {model_path}")
-        return str(model_path)
-    
-    try:
-        # YOLO will auto-download if model doesn't exist
-        model = YOLO(model_name)
-        logger.info(f"Downloaded YOLO model: {model_name}")
-        return model_name
-    except Exception as e:
-        logger.error(f"Failed to download model: {e}")
-        raise
+    return _detector

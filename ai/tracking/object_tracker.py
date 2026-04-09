@@ -1,205 +1,212 @@
-"""Multi-frame object tracking service."""
+"""Object tracking for dynamic scene reconstruction."""
 
+import cv2
 import numpy as np
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
+from collections import defaultdict
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TrackedObject:
-    """Single detection in a track."""
-    frame_id: int
-    label: str
-    confidence: float
-    bbox: Tuple[float, float, float, float]  # (x1, y1, x2, y2)
-    world_position: Optional[np.ndarray] = None  # 3D position if triangulated
+class Track:
+    """Object track across frames."""
+    track_id: int
+    class_name: str
+    bboxes: List[Tuple[int, int, int, int]] = field(default_factory=list)  # List of (x1, y1, x2, y2)
+    frame_ids: List[int] = field(default_factory=list)
+    confidences: List[float] = field(default_factory=list)
+    is_active: bool = True
+    
+    @property
+    def length(self) -> int:
+        """Get track length."""
+        return len(self.frame_ids)
+    
+    @property
+    def avg_confidence(self) -> float:
+        """Get average confidence."""
+        return np.mean(self.confidences) if self.confidences else 0.0
 
 
 @dataclass
-class Track:
-    """Object track across multiple frames."""
-    track_id: int
-    label: str
-    detections: List[TrackedObject] = field(default_factory=list)
-    is_static: Optional[bool] = None
-    world_positions: List[np.ndarray] = field(default_factory=list)
-    position_variance: Optional[float] = None
+class TrackingResult:
+    """Tracking result for a frame."""
+    frame_id: int
+    tracks: List[Track]
+    num_active_tracks: int
 
 
 class ObjectTracker:
-    """Multi-frame object tracker using IoU-based matching."""
+    """Multi-object tracker using IoU matching."""
     
     def __init__(
         self,
         iou_threshold: float = 0.3,
-        max_frames_skip: int = 5,
-        static_variance_threshold: float = 0.1
+        max_age: int = 30,
+        min_hits: int = 3
     ):
         """
         Initialize object tracker.
         
         Args:
-            iou_threshold: Minimum IoU for matching detections to tracks
-            max_frames_skip: Maximum frames a track can be missing before deletion
-            static_variance_threshold: Position variance threshold for static classification
+            iou_threshold: Minimum IoU for matching
+            max_age: Maximum frames to keep track without detection
+            min_hits: Minimum detections before track is confirmed
         """
         self.iou_threshold = iou_threshold
-        self.max_frames_skip = max_frames_skip
-        self.static_variance_threshold = static_variance_threshold
+        self.max_age = max_age
+        self.min_hits = min_hits
         
-        self.tracks: List[Track] = []
+        self.tracks: Dict[int, Track] = {}
         self.next_track_id = 0
         self.frame_count = 0
+        
+        logger.info(f"Initialized tracker (IoU={iou_threshold}, max_age={max_age})")
     
     def update(
         self,
-        detections: List[Dict],
-        frame_id: Optional[int] = None
-    ) -> List[Track]:
+        detections: List[Tuple[Tuple[int, int, int, int], str, float]]
+    ) -> TrackingResult:
         """
-        Update tracks with new detections from current frame.
+        Update tracker with new detections.
         
         Args:
-            detections: List of detections with 'label', 'confidence', 'bbox'
-            frame_id: Frame ID (auto-increments if None)
+            detections: List of (bbox, class_name, confidence) tuples
             
         Returns:
-            Updated list of active tracks
+            Tracking result
         """
-        if frame_id is None:
-            frame_id = self.frame_count
-        
-        self.frame_count = frame_id + 1
-        
-        # Convert detections to TrackedObjects
-        current_detections = [
-            TrackedObject(
-                frame_id=frame_id,
-                label=d['label'],
-                confidence=d['confidence'],
-                bbox=d['bbox']
-            )
-            for d in detections
-        ]
+        self.frame_count += 1
         
         # Match detections to existing tracks
-        matched_tracks, matched_detections = self._match_detections_to_tracks(
-            current_detections
-        )
+        matched_tracks, unmatched_detections = self._match_detections(detections)
         
         # Update matched tracks
-        for track_idx, det_idx in zip(matched_tracks, matched_detections):
-            detection = current_detections[det_idx]
-            
-            # Validate label consistency
-            if self.tracks[track_idx].label != detection.label:
-                logger.warning(
-                    f"Label mismatch in track {self.tracks[track_idx].track_id}: "
-                    f"{self.tracks[track_idx].label} != {detection.label}"
-                )
-                # Keep original label for consistency
-                detection.label = self.tracks[track_idx].label
-            
-            self.tracks[track_idx].detections.append(detection)
+        for track_id, (bbox, class_name, confidence) in matched_tracks:
+            track = self.tracks[track_id]
+            track.bboxes.append(bbox)
+            track.frame_ids.append(self.frame_count)
+            track.confidences.append(confidence)
+            track.is_active = True
         
         # Create new tracks for unmatched detections
-        unmatched_detection_indices = set(range(len(current_detections))) - set(matched_detections)
-        
-        for det_idx in unmatched_detection_indices:
-            detection = current_detections[det_idx]
-            new_track = Track(
-                track_id=self.next_track_id,
-                label=detection.label,
-                detections=[detection]
-            )
-            self.tracks.append(new_track)
+        for bbox, class_name, confidence in unmatched_detections:
+            track_id = self.next_track_id
             self.next_track_id += 1
-            logger.debug(f"Created new track {new_track.track_id} for {detection.label}")
+            
+            track = Track(
+                track_id=track_id,
+                class_name=class_name,
+                bboxes=[bbox],
+                frame_ids=[self.frame_count],
+                confidences=[confidence],
+                is_active=True
+            )
+            
+            self.tracks[track_id] = track
         
-        # Remove stale tracks (not updated for max_frames_skip frames)
-        self.tracks = [
-            track for track in self.tracks
-            if frame_id - track.detections[-1].frame_id <= self.max_frames_skip
-        ]
+        # Mark tracks as inactive if not updated
+        for track_id, track in self.tracks.items():
+            if track.frame_ids[-1] < self.frame_count:
+                # Check if track should be deleted
+                age = self.frame_count - track.frame_ids[-1]
+                if age > self.max_age:
+                    track.is_active = False
         
-        return self.tracks
+        # Get active tracks
+        active_tracks = [t for t in self.tracks.values() if t.is_active and t.length >= self.min_hits]
+        
+        return TrackingResult(
+            frame_id=self.frame_count,
+            tracks=active_tracks,
+            num_active_tracks=len(active_tracks)
+        )
     
-    def _match_detections_to_tracks(
+    def _match_detections(
         self,
-        detections: List[TrackedObject]
-    ) -> Tuple[List[int], List[int]]:
+        detections: List[Tuple[Tuple[int, int, int, int], str, float]]
+    ) -> Tuple[List[Tuple[int, Tuple]], List[Tuple]]:
         """
-        Match detections to existing tracks using IoU and label consistency.
+        Match detections to existing tracks using IoU.
         
         Args:
-            detections: Current frame detections
+            detections: List of detections
             
         Returns:
-            Tuple of (matched_track_indices, matched_detection_indices)
+            (matched_tracks, unmatched_detections)
         """
         if not self.tracks or not detections:
-            return [], []
+            return [], detections
         
-        # Compute IoU matrix
-        iou_matrix = np.zeros((len(self.tracks), len(detections)))
+        # Get active tracks from last frame
+        active_tracks = [
+            (tid, t) for tid, t in self.tracks.items()
+            if t.is_active and (self.frame_count - t.frame_ids[-1]) <= 1
+        ]
         
-        for i, track in enumerate(self.tracks):
-            last_detection = track.detections[-1]
-            
-            for j, detection in enumerate(detections):
-                # Only match if labels are consistent
-                if track.label == detection.label:
-                    iou = self._compute_iou(last_detection.bbox, detection.bbox)
-                    iou_matrix[i, j] = iou
+        if not active_tracks:
+            return [], detections
         
-        # Greedy matching: match highest IoU pairs above threshold
+        # Calculate IoU matrix
+        iou_matrix = np.zeros((len(active_tracks), len(detections)))
+        
+        for i, (track_id, track) in enumerate(active_tracks):
+            last_bbox = track.bboxes[-1]
+            for j, (det_bbox, _, _) in enumerate(detections):
+                iou_matrix[i, j] = self._calculate_iou(last_bbox, det_bbox)
+        
+        # Match using greedy algorithm
         matched_tracks = []
-        matched_detections = []
+        matched_det_indices = set()
         
-        while True:
-            # Find maximum IoU
-            max_iou = np.max(iou_matrix)
-            
-            if max_iou < self.iou_threshold:
-                break
-            
-            # Get indices of maximum
-            track_idx, det_idx = np.unravel_index(
-                np.argmax(iou_matrix),
-                iou_matrix.shape
-            )
-            
-            matched_tracks.append(track_idx)
-            matched_detections.append(det_idx)
-            
-            # Remove matched track and detection from consideration
-            iou_matrix[track_idx, :] = 0
-            iou_matrix[:, det_idx] = 0
+        # Sort by IoU (highest first)
+        matches = []
+        for i in range(len(active_tracks)):
+            for j in range(len(detections)):
+                if iou_matrix[i, j] >= self.iou_threshold:
+                    matches.append((iou_matrix[i, j], i, j))
         
-        return matched_tracks, matched_detections
+        matches.sort(reverse=True)
+        
+        matched_track_indices = set()
+        
+        for iou, track_idx, det_idx in matches:
+            if track_idx not in matched_track_indices and det_idx not in matched_det_indices:
+                track_id = active_tracks[track_idx][0]
+                matched_tracks.append((track_id, detections[det_idx]))
+                matched_track_indices.add(track_idx)
+                matched_det_indices.add(det_idx)
+        
+        # Get unmatched detections
+        unmatched_detections = [
+            det for i, det in enumerate(detections)
+            if i not in matched_det_indices
+        ]
+        
+        return matched_tracks, unmatched_detections
     
-    def _compute_iou(
+    def _calculate_iou(
         self,
-        bbox1: Tuple[float, float, float, float],
-        bbox2: Tuple[float, float, float, float]
+        bbox1: Tuple[int, int, int, int],
+        bbox2: Tuple[int, int, int, int]
     ) -> float:
         """
-        Compute Intersection over Union (IoU) between two bounding boxes.
+        Calculate Intersection over Union (IoU) between two bounding boxes.
         
         Args:
-            bbox1: First bbox (x1, y1, x2, y2)
-            bbox2: Second bbox (x1, y1, x2, y2)
+            bbox1: First bounding box (x1, y1, x2, y2)
+            bbox2: Second bounding box (x1, y1, x2, y2)
             
         Returns:
-            IoU value in [0, 1]
+            IoU value
         """
         x1_1, y1_1, x2_1, y2_1 = bbox1
         x1_2, y1_2, x2_2, y2_2 = bbox2
         
-        # Compute intersection
+        # Calculate intersection
         x1_i = max(x1_1, x1_2)
         y1_i = max(y1_1, y1_2)
         x2_i = min(x2_1, x2_2)
@@ -210,7 +217,7 @@ class ObjectTracker:
         
         intersection = (x2_i - x1_i) * (y2_i - y1_i)
         
-        # Compute union
+        # Calculate union
         area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
         area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
         union = area1 + area2 - intersection
@@ -220,137 +227,148 @@ class ObjectTracker:
         
         return intersection / union
     
-    def triangulate_and_classify(
-        self,
-        camera_poses: List[np.ndarray],
-        camera_intrinsics: np.ndarray
-    ):
-        """
-        Triangulate 3D positions for tracks and classify as static/dynamic.
-        
-        Args:
-            camera_poses: List of camera extrinsics (4x4 matrices) for each frame
-            camera_intrinsics: Camera intrinsic matrix (3x3)
-        """
-        for track in self.tracks:
-            if len(track.detections) < 2:
-                # Need at least 2 observations for triangulation
-                track.is_static = True  # Assume static if only one observation
-                continue
-            
-            # Triangulate 3D position for each detection
-            world_positions = []
-            
-            for detection in track.detections:
-                frame_id = detection.frame_id
-                
-                if frame_id >= len(camera_poses):
-                    logger.warning(f"No camera pose for frame {frame_id}")
-                    continue
-                
-                # Get bbox center as 2D observation
-                x1, y1, x2, y2 = detection.bbox
-                center_x = (x1 + x2) / 2
-                center_y = (y1 + y2) / 2
-                
-                # Simple triangulation using camera center and ray direction
-                camera_pose = camera_poses[frame_id]
-                camera_center = camera_pose[:3, 3]
-                
-                # Compute ray direction (simplified)
-                # In practice, use proper triangulation with multiple views
-                world_positions.append(camera_center)
-                detection.world_position = camera_center
-            
-            track.world_positions = world_positions
-            
-            # Compute position variance
-            if len(world_positions) >= 2:
-                positions_array = np.array(world_positions)
-                variance = np.var(positions_array, axis=0).mean()
-                track.position_variance = float(variance)
-                
-                # Classify as static or dynamic
-                track.is_static = variance < self.static_variance_threshold
-                
-                logger.debug(
-                    f"Track {track.track_id} ({track.label}): "
-                    f"variance={variance:.4f}, static={track.is_static}"
-                )
-            else:
-                track.is_static = True
+    def get_track(self, track_id: int) -> Optional[Track]:
+        """Get track by ID."""
+        return self.tracks.get(track_id)
+    
+    def get_all_tracks(self) -> List[Track]:
+        """Get all tracks."""
+        return list(self.tracks.values())
     
     def get_active_tracks(self) -> List[Track]:
-        """Get all active tracks."""
-        return self.tracks
+        """Get currently active tracks."""
+        return [t for t in self.tracks.values() if t.is_active]
     
-    def get_static_tracks(self) -> List[Track]:
-        """Get tracks classified as static."""
-        return [t for t in self.tracks if t.is_static is True]
+    def get_confirmed_tracks(self) -> List[Track]:
+        """Get confirmed tracks (length >= min_hits)."""
+        return [t for t in self.tracks.values() if t.length >= self.min_hits]
     
-    def get_dynamic_tracks(self) -> List[Track]:
-        """Get tracks classified as dynamic."""
-        return [t for t in self.tracks if t.is_static is False]
-    
-    def validate_track_consistency(self, track: Track) -> bool:
+    def visualize(
+        self,
+        image: np.ndarray,
+        result: TrackingResult,
+        show_ids: bool = True,
+        show_trails: bool = False
+    ) -> np.ndarray:
         """
-        Validate track label consistency.
+        Visualize tracking results.
         
         Args:
-            track: Track to validate
+            image: Input image
+            result: Tracking result
+            show_ids: Show track IDs
+            show_trails: Show track trails
             
         Returns:
-            True if all detections have same label
+            Visualized image
         """
-        if not track.detections:
-            return True
+        vis_image = image.copy()
         
-        first_label = track.detections[0].label
-        
-        for detection in track.detections[1:]:
-            if detection.label != first_label:
-                logger.error(
-                    f"Track {track.track_id} has inconsistent labels: "
-                    f"{first_label} != {detection.label}"
+        for track in result.tracks:
+            if not track.bboxes:
+                continue
+            
+            # Get current bbox
+            bbox = track.bboxes[-1]
+            x1, y1, x2, y2 = bbox
+            
+            # Generate color based on track ID
+            color = self._get_color(track.track_id)
+            
+            # Draw bounding box
+            cv2.rectangle(vis_image, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw track ID
+            if show_ids:
+                label = f"ID:{track.track_id} {track.class_name}"
+                cv2.putText(
+                    vis_image,
+                    label,
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    2
                 )
-                return False
+            
+            # Draw trail
+            if show_trails and len(track.bboxes) > 1:
+                centers = []
+                for bbox in track.bboxes[-10:]:  # Last 10 positions
+                    cx = (bbox[0] + bbox[2]) // 2
+                    cy = (bbox[1] + bbox[3]) // 2
+                    centers.append((cx, cy))
+                
+                for i in range(len(centers) - 1):
+                    cv2.line(vis_image, centers[i], centers[i + 1], color, 2)
         
-        return True
+        return vis_image
     
-    def validate_track_ids_unique(self) -> bool:
-        """
-        Validate that all track IDs are unique.
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get tracking statistics."""
+        all_tracks = self.get_all_tracks()
+        active_tracks = self.get_active_tracks()
+        confirmed_tracks = self.get_confirmed_tracks()
         
-        Returns:
-            True if all track IDs are unique
-        """
-        track_ids = [t.track_id for t in self.tracks]
+        # Track lengths
+        track_lengths = [t.length for t in all_tracks]
         
-        if len(track_ids) != len(set(track_ids)):
-            logger.error("Duplicate track IDs found")
-            return False
-        
-        return True
-    
-    def get_track_stats(self) -> Dict:
-        """Get statistics about tracks."""
-        if not self.tracks:
-            return {
-                'num_tracks': 0,
-                'num_static': 0,
-                'num_dynamic': 0,
-                'labels': []
-            }
-        
-        labels = [t.label for t in self.tracks]
+        # Class distribution
+        class_counts = defaultdict(int)
+        for track in confirmed_tracks:
+            class_counts[track.class_name] += 1
         
         return {
-            'num_tracks': len(self.tracks),
-            'num_static': len(self.get_static_tracks()),
-            'num_dynamic': len(self.get_dynamic_tracks()),
-            'labels': list(set(labels)),
-            'label_counts': {label: labels.count(label) for label in set(labels)},
-            'avg_track_length': np.mean([len(t.detections) for t in self.tracks]),
-            'max_track_length': max([len(t.detections) for t in self.tracks]),
-            'min_track_length': min([len(t.detections) for t in self.tracks])
+            'total_tracks': len(all_tracks),
+            'active_tracks': len(active_tracks),
+            'confirmed_tracks': len(confirmed_tracks),
+            'avg_track_length': np.mean(track_lengths) if track_lengths else 0,
+            'max_track_length': max(track_lengths) if track_lengths else 0,
+            'class_distribution': dict(class_counts),
+            'current_frame': self.frame_count
         }
+    
+    def reset(self):
+        """Reset tracker state."""
+        self.tracks.clear()
+        self.next_track_id = 0
+        self.frame_count = 0
+        logger.info("Tracker reset")
+    
+    def _get_color(self, track_id: int) -> Tuple[int, int, int]:
+        """Get consistent color for track ID."""
+        np.random.seed(track_id)
+        color = tuple(np.random.randint(0, 255, 3).tolist())
+        return color
+
+
+# Global tracker instance
+_tracker: Optional[ObjectTracker] = None
+
+
+def get_tracker(
+    iou_threshold: float = 0.3,
+    max_age: int = 30,
+    min_hits: int = 3
+) -> ObjectTracker:
+    """
+    Get or create global object tracker instance.
+    
+    Args:
+        iou_threshold: IoU threshold for matching
+        max_age: Maximum age for tracks
+        min_hits: Minimum hits for confirmation
+        
+    Returns:
+        ObjectTracker instance
+    """
+    global _tracker
+    
+    if _tracker is None:
+        _tracker = ObjectTracker(
+            iou_threshold=iou_threshold,
+            max_age=max_age,
+            min_hits=min_hits
+        )
+    
+    return _tracker

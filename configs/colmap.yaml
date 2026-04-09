@@ -1,15 +1,13 @@
 # COLMAP Configuration
-# Structure-from-Motion and Multi-View Stereo parameters
+# Structure-from-Motion parameters
 
-# Feature Extraction
 feature_extraction:
-  camera_model: "SIMPLE_RADIAL"  # SIMPLE_PINHOLE, PINHOLE, SIMPLE_RADIAL, RADIAL, OPENCV, FULL_OPENCV
+  camera_model: "OPENCV"  # SIMPLE_PINHOLE, PINHOLE, SIMPLE_RADIAL, RADIAL, OPENCV, OPENCV_FISHEYE
   single_camera: false
-  gpu_index: 0
+  gpu_index: "0"
   
-  # SIFT parameters
+  # Feature detector
   sift:
-    max_image_size: 3200
     max_num_features: 8192
     first_octave: -1
     num_octaves: 4
@@ -19,25 +17,17 @@ feature_extraction:
     max_num_orientations: 2
     upright: false
 
-# Feature Matching
 feature_matching:
-  gpu_index: 0
-  max_ratio: 0.8  # Lowe's ratio test
+  gpu_index: "0"
+  max_num_matches: 32768
   max_distance: 0.7
   cross_check: true
-  max_error: 4.0  # RANSAC reprojection error threshold (pixels)
+  max_error: 4.0
   confidence: 0.999
   min_num_inliers: 15
-  min_inlier_ratio: 0.25
-  
-  # Matching strategy
-  guided_matching: false
   multiple_models: false
-  
-  # Vocabulary tree (for large datasets)
-  vocab_tree_path: ""  # Path to vocabulary tree file
+  guided_matching: false
 
-# Incremental Mapping (SfM)
 mapper:
   min_num_matches: 15
   ignore_watermarks: false
@@ -52,24 +42,14 @@ mapper:
   init_max_forward_motion: 0.95
   init_min_tri_angle: 16.0
   
-  # Registration
+  # Triangulation
   abs_pose_max_error: 12.0
   abs_pose_min_num_inliers: 30
   abs_pose_min_inlier_ratio: 0.25
+  filter_max_reproj_error: 4.0
+  filter_min_tri_angle: 1.5
   
-  # Triangulation
-  tri_min_angle: 1.5
-  tri_ignore_two_view_tracks: true
-  tri_max_transitivity: 1
-  tri_create_max_angle_error: 2.0
-  tri_continue_max_angle_error: 2.0
-  tri_merge_max_reproj_error: 4.0
-  tri_complete_max_reproj_error: 4.0
-  tri_re_max_angle_error: 5.0
-  tri_re_min_ratio: 0.2
-  tri_re_max_trials: 1
-  
-  # Bundle Adjustment
+  # Bundle adjustment
   ba_refine_focal_length: true
   ba_refine_principal_point: false
   ba_refine_extra_params: true
@@ -79,62 +59,38 @@ mapper:
   ba_global_images_ratio: 1.1
   ba_global_points_ratio: 1.1
   ba_global_max_refinements: 5
-  ba_local_max_refinements: 2
-  
-  # Filtering
-  filter_max_reproj_error: 4.0
-  filter_min_tri_angle: 1.5
-  
-  # Snapshot
-  snapshot_path: ""
-  snapshot_images_freq: 0
 
-# Dense Reconstruction (MVS)
-dense:
-  # Patch Match Stereo
-  patch_match:
-    max_image_size: 2000
-    gpu_index: 0
-    depth_min: 0.0
-    depth_max: 100.0
-    window_radius: 5
-    window_step: 1
-    sigma_spatial: 3.0
-    sigma_color: 0.2
-    num_samples: 15
-    ncc_sigma: 0.6
-    min_triangulation_angle: 1.0
-    incident_angle_sigma: 0.9
-    num_iterations: 5
-    geom_consistency: true
-    geom_consistency_regularizer: 0.3
-    geom_consistency_max_cost: 3.0
-    filter: true
-    filter_min_ncc: 0.1
-    filter_min_triangulation_angle: 3.0
-    filter_min_num_consistent: 2
-    filter_geom_consistency_max_cost: 1.0
-    cache_size: 32
-    
-  # Stereo Fusion
-  fusion:
-    min_num_pixels: 5
-    max_num_pixels: 10000
-    max_traversal_depth: 100
-    max_reproj_error: 2.0
-    max_depth_error: 0.01
-    max_normal_error: 10.0
-    check_num_images: 50
-    cache_size: 32
+dense_reconstruction:
+  # Stereo
+  max_image_size: 2000
+  gpu_index: "0"
+  window_radius: 5
+  window_step: 1
+  sigma_spatial: 3.0
+  sigma_color: 0.3
+  num_samples: 15
+  ncc_sigma: 0.6
+  min_triangulation_angle: 1.0
+  incident_angle_sigma: 0.9
+  num_iterations: 5
+  geom_consistency: true
+  geom_consistency_regularizer: 0.3
+  geom_consistency_max_cost: 3.0
+  filter: true
+  filter_min_ncc: 0.1
+  filter_min_triangulation_angle: 3.0
+  filter_min_num_consistent: 3
+  filter_geom_consistency_max_cost: 1.0
+  
+  # Fusion
+  check_num_images: 50
+  max_reproj_error: 2.0
+  max_depth_error: 0.01
+  max_normal_error: 10.0
+  min_num_pixels: 5
+  max_num_pixels: 10000
 
-# Output
 output:
-  sparse_model_path: "sparse"
-  dense_model_path: "dense"
-  export_path: "exports"
-  
-# Performance
-performance:
-  num_threads: -1  # -1 = use all available cores
-  gpu_index: 0
-  use_gpu: true
+  sparse_model_path: "sparse/0"
+  dense_model_path: "dense/0"
+  export_format: "BIN"  # BIN, TXT, NVM, Bundler, VRML, PLY

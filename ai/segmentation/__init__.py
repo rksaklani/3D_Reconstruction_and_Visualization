@@ -1,5 +1,5 @@
 """Semantic segmentation module."""
 
-from .sam import SAMSegmenter, SegmentationMask
+from .sam import SAMSegmenter, Segment
 
-__all__ = ['SAMSegmenter', 'SegmentationMask']
+__all__ = ['SAMSegmenter', 'Segment']
