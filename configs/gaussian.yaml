@@ -1,0 +1,134 @@
+# Gaussian Splatting Configuration
+# 3D Gaussian Splatting training and rendering parameters
+
+# Model Initialization
+initialization:
+  num_points: 100000  # Initial number of Gaussians (from sparse point cloud)
+  position_lr_init: 0.00016
+  position_lr_final: 0.0000016
+  position_lr_delay_mult: 0.01
+  position_lr_max_steps: 30000
+  
+  feature_lr: 0.0025
+  opacity_lr: 0.05
+  scaling_lr: 0.005
+  rotation_lr: 0.001
+  
+  # Initial parameter ranges
+  opacity_init: 0.1
+  scale_init: 1.0
+  rotation_init: [1.0, 0.0, 0.0, 0.0]  # Quaternion (w, x, y, z)
+
+# Spherical Harmonics
+spherical_harmonics:
+  degree: 3  # SH degree (0-3, higher = more view-dependent color)
+  sh_lr: 0.0025
+
+# Training
+training:
+  iterations: 30000
+  batch_size: 1
+  
+  # Loss weights
+  lambda_dssim: 0.2  # SSIM loss weight
+  lambda_l1: 0.8     # L1 loss weight
+  
+  # Densification
+  densify_from_iter: 500
+  densify_until_iter: 15000
+  densification_interval: 100
+  opacity_reset_interval: 3000
+  
+  densify_grad_threshold: 0.0002
+  densify_size_threshold: 0.01  # Screen-space size threshold
+  
+  # Pruning
+  prune_opacity_threshold: 0.005
+  prune_scale_threshold: 0.1
+  prune_interval: 100
+  
+  # Adaptive density control
+  percent_dense: 0.01
+  
+  # Checkpointing
+  checkpoint_interval: 5000
+  save_iterations: [7000, 15000, 30000]
+
+# Rendering
+rendering:
+  # Rasterization
+  image_height: 1080
+  image_width: 1920
+  fov_y: 45.0  # Field of view in degrees
+  
+  # Splatting
+  scaling_modifier: 1.0
+  
+  # Culling
+  near_plane: 0.01
+  far_plane: 100.0
+  
+  # Quality
+  antialiasing: true
+  
+  # Performance
+  tile_size: 16  # Tile-based rendering
+  max_gaussians_per_tile: 1024
+
+# Optimization
+optimization:
+  # Gradient clipping
+  gradient_clip: 1.0
+  
+  # Regularization
+  opacity_regularization: 0.0
+  scale_regularization: 0.0
+  
+  # Convergence
+  convergence_threshold: 0.0001
+  patience: 5  # Early stopping patience
+
+# Data
+data:
+  # Image preprocessing
+  resolution: -1  # -1 = use original resolution
+  white_background: false
+  
+  # Data loading
+  shuffle: true
+  num_workers: 4
+  
+  # Validation
+  eval_interval: 1000
+  test_iterations: [7000, 15000, 30000]
+
+# Export
+export:
+  # PLY export
+  ply_format: "binary"  # "ascii" or "binary"
+  
+  # Splat export
+  include_sh: true
+  include_opacity: true
+  include_scale: true
+  include_rotation: true
+  
+  # Compression
+  compress: false
+  quantize_positions: false
+  quantize_colors: false
+
+# Advanced
+advanced:
+  # Covariance computation
+  compute_cov3d_python: false  # Use CUDA if false
+  
+  # Debug
+  debug: false
+  visualize_training: false
+  
+  # Memory
+  max_memory_mb: 8192  # Maximum GPU memory usage
+  
+  # Precision
+  use_fp16: false  # Half precision training
