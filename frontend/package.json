@@ -11,6 +11,8 @@
   "dependencies": {
     "@babylonjs/core": "^9.2.0",
     "@babylonjs/loaders": "^9.2.0",
+    "@babylonjs/materials": "^9.2.0",
+    "ammo.js": "^0.0.10",
     "axios": "^1.6.7",
     "lucide-react": "^1.8.0",
     "react": "^18.3.1",

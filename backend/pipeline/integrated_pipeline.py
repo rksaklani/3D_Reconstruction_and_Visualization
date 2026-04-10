@@ -44,7 +44,7 @@ class IntegratedPipeline:
         """Initialize integrated pipeline with all services."""
         logger.info("Initializing integrated pipeline...")
         
-        # Load configuration
+        # Load configuration (returns Config object, not dict)
         self.config = get_config()
         
         # Initialize storage
@@ -61,13 +61,9 @@ class IntegratedPipeline:
             blur_threshold=100.0
         ))
         
-        # Initialize COLMAP (optional - may not be installed)
-        try:
-            self.colmap = get_colmap_service()
-            logger.info("✓ COLMAP service initialized")
-        except Exception as e:
-            self.colmap = None
-            logger.warning(f"COLMAP not available: {e}")
+        # Initialize COLMAP (required for SfM)
+        self.colmap = get_colmap_service()
+        logger.info("✓ COLMAP service initialized")
         
         # Initialize AI services (lazy-loaded to avoid CUDA errors at startup)
         self.detector = None
@@ -75,8 +71,8 @@ class IntegratedPipeline:
         self.tracker = None
         self.classifier = None
         
-        # Initialize export manager
-        self.export_manager = ExportManager(self.config.get('export', {}))
+        # Initialize export manager (config is not a dict, use empty dict)
+        self.export_manager = ExportManager({})
         
         logger.info("✓ Integrated pipeline initialized")
     
@@ -100,24 +96,21 @@ class IntegratedPipeline:
             self.tracker = None
             self.classifier = None
     
-    def process_job_sync(self, job_id: str):
+    async def process_job_async(self, job_id: str):
         """
-        Synchronous wrapper for process_job to run in background tasks.
+        Async wrapper for process_job to run in background tasks.
         
         Args:
             job_id: Job identifier
         """
-        import asyncio
-        
-        # Create new event loop for background task
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
         try:
-            result = loop.run_until_complete(self.process_job(job_id))
+            result = await self.process_job(job_id)
             return result
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.error(f"Background task failed for job {job_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
     
     async def process_job(self, job_id: str) -> Dict:
         """
@@ -249,19 +242,6 @@ class IntegratedPipeline:
         """Structure from Motion stage."""
         job_id = job['job_id']
         
-        # Check if COLMAP is available
-        if self.colmap is None:
-            logger.warning("COLMAP not available, skipping SfM stage")
-            return {
-                'num_cameras': 0,
-                'num_images': preprocess_result['num_images'],
-                'num_points': 0,
-                'sparse_dir': None,
-                'workspace_dir': None,
-                'skipped': True,
-                'reason': 'COLMAP binary not installed'
-            }
-        
         # Prepare COLMAP workspace in temp directory
         job_temp_dir = Path(preprocess_result['temp_dir'])
         workspace_dir = job_temp_dir / "colmap"
@@ -270,40 +250,32 @@ class IntegratedPipeline:
         image_dir = Path(preprocess_result['preprocessed_dir'])
         
         try:
-            # Run COLMAP pipeline
-            # Feature extraction
-            self.colmap.feature_extraction(
-                str(workspace_dir),
-                str(image_dir)
+            # Run COLMAP pipeline (GPU-accelerated)
+            logger.info(f"Running COLMAP SfM on {image_dir}")
+            logger.info(f"Using COLMAP binary: {self.colmap.colmap_bin}")
+            
+            result = self.colmap.run_sfm(
+                image_dir=str(image_dir),
+                output_dir=str(workspace_dir),
+                camera_model="SIMPLE_RADIAL",
+                single_camera=False,
+                gpu_index=0
             )
             
-            # Feature matching
-            self.colmap.feature_matching(str(workspace_dir))
-            
-            # Incremental mapping
-            sparse_dir = workspace_dir / "sparse" / "0"
-            sparse_dir.mkdir(parents=True, exist_ok=True)
-            
-            self.colmap.incremental_mapping(
-                str(workspace_dir),
-                str(sparse_dir)
-            )
-            
-            # Parse results
-            cameras, images_data, points3D = self.colmap.parse_sparse_reconstruction(
-                str(sparse_dir)
-            )
+            sparse_dir = workspace_dir / "0"
             
             return {
-                'num_cameras': len(cameras),
-                'num_images': len(images_data),
-                'num_points': len(points3D),
+                'num_cameras': result.num_cameras,
+                'num_images': result.num_images,
+                'num_points': result.num_points,
+                'mean_error': result.mean_reprojection_error,
                 'sparse_dir': str(sparse_dir),
                 'workspace_dir': str(workspace_dir)
             }
             
         except Exception as e:
-            logger.warning(f"COLMAP failed: {e}")
+            logger.error(f"COLMAP failed: {e}")
+            logger.error(traceback.format_exc())
             # Return placeholder results
             return {
                 'num_cameras': 0,

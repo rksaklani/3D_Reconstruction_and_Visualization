@@ -51,6 +51,7 @@ class Job(Document):
     status: JobStatus = JobStatus.CREATED
     stage: Optional[PipelineStage] = None
     progress: float = 0.0  # 0.0 to 1.0
+    pid: Optional[int] = None  # Process ID for subprocess control
     
     # Configuration
     config: Dict[str, Any] = Field(default_factory=dict)

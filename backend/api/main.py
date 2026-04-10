@@ -5,7 +5,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 import sys
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent / '.env'
+load_dotenv(dotenv_path=env_path)
+print(f"Loaded .env from: {env_path}")
+print(f"MONGODB_DATABASE: {os.getenv('MONGODB_DATABASE', 'not set')}")
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -84,7 +92,7 @@ async def root():
 
 
 # Import and include routers
-from backend.api.routes import jobs, upload, status, download, process, config
+from backend.api.routes import jobs, upload, status, download, process, config, logs, reconstruction
 
 app.include_router(jobs.router)
 app.include_router(upload.router)
@@ -92,6 +100,8 @@ app.include_router(status.router)
 app.include_router(download.router)
 app.include_router(process.router)
 app.include_router(config.router)
+app.include_router(logs.router)
+app.include_router(reconstruction.router)
 
 
 if __name__ == "__main__":

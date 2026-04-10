@@ -1,17 +1,22 @@
 """Database initialization and connection."""
 
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
 import os
 from typing import Optional
 
-# MongoDB connection
+# Async MongoDB connection (for FastAPI endpoints)
 mongodb_client: Optional[AsyncIOMotorClient] = None
 database = None
 
+# Sync MongoDB connection (for threaded pipeline)
+sync_mongodb_client: Optional[MongoClient] = None
+sync_database = None
+
 
 async def connect_to_mongo():
-    """Connect to MongoDB."""
-    global mongodb_client, database
+    """Connect to MongoDB (async)."""
+    global mongodb_client, database, sync_mongodb_client, sync_database
     
     # Get MongoDB URL from environment or use default
     mongodb_url = os.getenv(
@@ -20,9 +25,13 @@ async def connect_to_mongo():
     )
     database_name = os.getenv("MONGODB_DATABASE", "reconstruction")
     
-    # Create client
+    # Create async client
     mongodb_client = AsyncIOMotorClient(mongodb_url)
     database = mongodb_client[database_name]
+    
+    # Create sync client for threaded pipeline
+    sync_mongodb_client = MongoClient(mongodb_url)
+    sync_database = sync_mongodb_client[database_name]
     
     # Test connection
     try:
@@ -35,14 +44,24 @@ async def connect_to_mongo():
 
 async def close_mongo_connection():
     """Close MongoDB connection."""
-    global mongodb_client
+    global mongodb_client, sync_mongodb_client
     if mongodb_client:
         mongodb_client.close()
-        print("✓ Closed MongoDB connection")
+        print("✓ Closed async MongoDB connection")
+    if sync_mongodb_client:
+        sync_mongodb_client.close()
+        print("✓ Closed sync MongoDB connection")
 
 
 def get_database():
-    """Get database instance."""
+    """Get database instance (async)."""
     if database is None:
         raise RuntimeError("Database not initialized. Call connect_to_mongo() first.")
     return database
+
+
+def get_sync_database():
+    """Get sync database instance (for threaded pipeline)."""
+    if sync_database is None:
+        raise RuntimeError("Sync database not initialized. Call connect_to_mongo() first.")
+    return sync_database

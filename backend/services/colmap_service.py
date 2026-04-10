@@ -88,21 +88,22 @@ class COLMAPService:
         """Find COLMAP binary."""
         # Try common locations
         locations = [
+            "/home/rk/aditya/reconstruction/colmap/build/src/colmap/exe/colmap",  # Local GPU build (absolute path)
+            str(Path.cwd() / "reconstruction" / "colmap" / "build" / "src" / "colmap" / "exe" / "colmap"),  # Relative path
             "colmap",  # In PATH
             "/usr/local/bin/colmap",
             "/usr/bin/colmap",
-            str(Path.cwd() / "reconstruction" / "colmap" / "build" / "src" / "colmap" / "exe" / "colmap"),
         ]
         
         for loc in locations:
             try:
                 result = subprocess.run(
-                    [loc, "--version"],
+                    [loc, "help"],
                     capture_output=True,
                     text=True,
                     timeout=5
                 )
-                if result.returncode == 0:
+                if result.returncode == 0 and "COLMAP" in result.stdout:
                     return loc
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 continue
@@ -115,7 +116,8 @@ class COLMAPService:
         output_dir: Optional[str] = None,
         camera_model: str = "SIMPLE_RADIAL",
         single_camera: bool = False,
-        gpu_index: int = 0
+        gpu_index: int = 0,
+        matcher: str = "sequential"  # Added matcher parameter
     ) -> SfMResult:
         """
         Run complete SfM pipeline.
@@ -154,8 +156,8 @@ class COLMAPService:
             )
             
             # Step 2: Feature matching
-            logger.info("Matching features...")
-            self._match_features(database_path, gpu_index)
+            logger.info(f"Matching features ({matcher} matcher)...")
+            self._match_features(database_path, gpu_index, matcher)
             
             # Step 3: Incremental mapping
             logger.info("Running incremental mapping...")
@@ -195,23 +197,47 @@ class COLMAPService:
             "--image_path", str(image_dir),
             "--ImageReader.camera_model", camera_model,
             "--ImageReader.single_camera", "1" if single_camera else "0",
-            "--SiftExtraction.use_gpu", "1",
-            "--SiftExtraction.gpu_index", str(gpu_index),
+            "--FeatureExtraction.use_gpu", "1",
+            "--FeatureExtraction.gpu_index", str(gpu_index),
+            "--FeatureExtraction.num_threads", "8",
+            "--FeatureExtraction.max_image_size", "3200",
         ]
         
-        subprocess.run(cmd, check=True, capture_output=True)
+        # Set environment to disable Qt GUI (headless mode)
+        env = os.environ.copy()
+        env['QT_QPA_PLATFORM'] = 'offscreen'
+        env['DISPLAY'] = ''
+        
+        subprocess.run(cmd, check=True, capture_output=True, env=env)
     
-    def _match_features(self, database_path: Path, gpu_index: int) -> None:
+    def _match_features(self, database_path: Path, gpu_index: int, matcher: str = "sequential") -> None:
         """Match features between images."""
-        cmd = [
-            self.colmap_bin,
-            "exhaustive_matcher",
-            "--database_path", str(database_path),
-            "--SiftMatching.use_gpu", "1",
-            "--SiftMatching.gpu_index", str(gpu_index),
-        ]
+        if matcher == "sequential":
+            cmd = [
+                self.colmap_bin,
+                "sequential_matcher",
+                "--database_path", str(database_path),
+                "--FeatureMatching.use_gpu", "1",
+                "--FeatureMatching.gpu_index", str(gpu_index),
+                "--SequentialMatching.overlap", "10",  # Match with 10 neighboring images
+            ]
+        else:  # exhaustive
+            cmd = [
+                self.colmap_bin,
+                "exhaustive_matcher",
+                "--database_path", str(database_path),
+                "--FeatureMatching.use_gpu", "1",
+                "--FeatureMatching.gpu_index", str(gpu_index),
+                "--FeatureMatching.max_num_matches", "32768",
+                "--FeatureMatching.max_ratio", "0.8",
+            ]
         
-        subprocess.run(cmd, check=True, capture_output=True)
+        # Set environment to disable Qt GUI (headless mode)
+        env = os.environ.copy()
+        env['QT_QPA_PLATFORM'] = 'offscreen'
+        env['DISPLAY'] = ''
+        
+        subprocess.run(cmd, check=True, capture_output=True, env=env)
     
     def _incremental_mapping(
         self,
@@ -228,7 +254,12 @@ class COLMAPService:
             "--output_path", str(output_dir),
         ]
         
-        subprocess.run(cmd, check=True, capture_output=True)
+        # Set environment to disable Qt GUI (headless mode)
+        env = os.environ.copy()
+        env['QT_QPA_PLATFORM'] = 'offscreen'
+        env['DISPLAY'] = ''
+        
+        subprocess.run(cmd, check=True, capture_output=True, env=env)
     
     def parse_sfm_result(self, model_dir: str) -> SfMResult:
         """

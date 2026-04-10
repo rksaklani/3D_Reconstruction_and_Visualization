@@ -156,6 +156,19 @@ if check_port 8000; then
     sleep 2
 fi
 
+# Check if COLMAP is installed
+echo -n "  Checking COLMAP... "
+if command -v colmap &> /dev/null; then
+    COLMAP_VERSION=$(colmap help 2>&1 | head -1 | grep -oP 'COLMAP \K[0-9.]+' || echo "unknown")
+    echo -e "${GREEN}✓ v${COLMAP_VERSION}${NC}"
+else
+    echo -e "${RED}✗ Not found${NC}"
+    echo -e "${YELLOW}  Warning: COLMAP is required for Structure from Motion${NC}"
+    echo "  Install: sudo apt install colmap"
+    echo "  Or build from source in reconstruction/colmap/"
+    exit 1
+fi
+
 # Check if virtual environment exists
 if [ ! -d "backend/venv" ]; then
     echo -e "${RED}✗ Virtual environment not found${NC}"
@@ -174,7 +187,7 @@ echo "    - FastAPI server"
 echo "    - Integrated Pipeline"
 echo "    - AI Services (YOLO, SAM, Tracker, Classifier)"
 echo "    - Reconstruction Pipeline"
-echo "    - COLMAP Integration (optional)"
+echo "    - COLMAP Integration (Structure from Motion)"
 
 cd backend
 source venv/bin/activate
@@ -292,7 +305,7 @@ echo -e "  ${GREEN}✓${NC} Object Storage (MinIO)"
 echo -e "  ${GREEN}✓${NC} AI Services (YOLO, SAM, Tracker, Classifier)"
 echo -e "  ${GREEN}✓${NC} Preprocessing Pipeline"
 echo -e "  ${GREEN}✓${NC} Reconstruction Pipeline"
-echo -e "  ${GREEN}✓${NC} COLMAP Integration (optional)"
+echo -e "  ${GREEN}✓${NC} COLMAP Integration (Structure from Motion)"
 echo -e "  ${GREEN}✓${NC} Export System"
 echo -e "  ${GREEN}✓${NC} Frontend (React)"
 

@@ -1,8 +1,8 @@
 """Processing endpoints for running the reconstruction pipeline."""
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from backend.database import get_database
-from backend.pipeline.integrated_pipeline import get_integrated_pipeline
+from backend.pipeline.threaded_pipeline import get_threaded_pipeline
 import logging
 
 router = APIRouter(prefix="/api/process", tags=["process"])
@@ -10,13 +10,12 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/{job_id}/start")
-async def start_processing(job_id: str, background_tasks: BackgroundTasks):
+async def start_processing(job_id: str):
     """
     Start processing a job.
     
     Args:
         job_id: Job identifier
-        background_tasks: FastAPI background tasks
         
     Returns:
         Processing confirmation
@@ -56,9 +55,9 @@ async def start_processing(job_id: str, background_tasks: BackgroundTasks):
         }}
     )
     
-    # Start processing in background
-    pipeline = get_integrated_pipeline()
-    background_tasks.add_task(pipeline.process_job_sync, job_id)
+    # Start processing in background thread
+    pipeline = get_threaded_pipeline()
+    pipeline.start_job(job_id)
     
     logger.info(f"Started processing job: {job_id}")
     
@@ -94,16 +93,9 @@ async def stop_processing(job_id: str):
             detail=f"Job is not processing (status: {job['status']})"
         )
     
-    # Update status to stopped
-    from datetime import datetime
-    await db.jobs.update_one(
-        {"job_id": job_id},
-        {"$set": {
-            "status": "stopped",
-            "updated_at": datetime.utcnow(),
-            "error": "Stopped by user"
-        }}
-    )
+    # Stop job
+    pipeline = get_threaded_pipeline()
+    pipeline.stop_job(job_id)
     
     logger.info(f"Stopped processing job: {job_id}")
     
@@ -112,3 +104,4 @@ async def stop_processing(job_id: str):
         "status": "stopped",
         "message": "Job processing stopped"
     }
+

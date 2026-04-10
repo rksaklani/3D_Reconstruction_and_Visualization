@@ -39,11 +39,15 @@ function JobDetail() {
 
   const fetchLog = async () => {
     try {
-      const response = await jobsApi.getJobLog(id)  // Changed from jobId to id
-      // Extract the log text from the response
-      setLog(response.data.log || response.data || '')
+      const response = await jobsApi.getJobLog(id)
+      // The new endpoint returns plain text directly
+      setLog(response.data || '')
     } catch (error) {
       console.error('Failed to fetch log:', error)
+      // Don't show error if log doesn't exist yet
+      if (error.response?.status !== 404) {
+        setLog('Error loading log: ' + error.message)
+      }
     }
   }
 
@@ -72,10 +76,24 @@ function JobDetail() {
       case 'processing': return 'bg-blue-100 text-blue-800'
       case 'completed': return 'bg-green-100 text-green-800'
       case 'failed': return 'bg-red-100 text-red-800'
+      case 'stopped': return 'bg-orange-100 text-orange-800'
       case 'uploaded': return 'bg-purple-100 text-purple-800'
       case 'created': return 'bg-gray-100 text-gray-800'
       default: return 'bg-gray-100 text-gray-800'
     }
+  }
+
+  const getStageDisplay = (stage) => {
+    const stageNames = {
+      'preprocessing': 'Preprocessing',
+      'sfm': 'Structure from Motion',
+      'ai_analysis': 'AI Scene Understanding',
+      'gaussian_training': 'Gaussian Splatting',
+      'export': 'Export',
+      'complete': 'Complete',
+      'initializing': 'Initializing'
+    }
+    return stageNames[stage] || stage
   }
 
   if (loading) {
@@ -111,8 +129,21 @@ function JobDetail() {
                 <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStateColor(job.status)}`}>
                   {job.status}
                 </span>
-                {job.stage && <span>Stage: {job.stage}</span>}
-                {job.progress > 0 && <span>Progress: {job.progress}%</span>}
+                {job.stage && (
+                  <span className="px-3 py-1 bg-gray-100 rounded-full text-xs font-semibold">
+                    {getStageDisplay(job.stage)}
+                  </span>
+                )}
+                {job.progress !== undefined && job.progress > 0 && (
+                  <span className="px-3 py-1 bg-blue-50 rounded-full text-xs font-semibold text-blue-700">
+                    {Math.round(job.progress * 100)}%
+                  </span>
+                )}
+                {job.pid && (
+                  <span className="px-3 py-1 bg-gray-100 rounded-full text-xs font-mono">
+                    PID: {job.pid}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -123,10 +154,18 @@ function JobDetail() {
               >
                 Back
               </Link>
+              {job.status === 'completed' && (
+                <Link
+                  to={`/viewer/${job.job_id}`}
+                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                >
+                  View 3D
+                </Link>
+              )}
               {job.status === 'uploaded' && (
                 <button
                   onClick={() => handleStartProcessing()}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
                   Start Processing
                 </button>
@@ -162,6 +201,24 @@ function JobDetail() {
             </div>
           </div>
 
+          {/* Error Display */}
+          {job.error && (
+            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <h3 className="font-semibold text-red-800 mb-2">Error</h3>
+              <p className="text-red-700 text-sm">{job.error}</p>
+              {job.error_details && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-red-600 text-xs hover:text-red-800">
+                    Show details
+                  </summary>
+                  <pre className="mt-2 p-2 bg-red-100 rounded text-xs overflow-auto max-h-40">
+                    {job.error_details}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
+
           {/* Configuration */}
           {job.config && (
             <details className="mt-4">
@@ -184,9 +241,28 @@ function JobDetail() {
 
         {/* Log Card */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-lg font-bold mb-4">Processing Log</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold">Real-Time Processing Log</h2>
+            <div className="flex items-center gap-2">
+              {job.status === 'processing' && (
+                <span className="flex items-center gap-2 text-sm text-blue-600">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                  </span>
+                  Live
+                </span>
+              )}
+              <button
+                onClick={fetchLog}
+                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
           <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-auto max-h-[70vh] text-sm font-mono whitespace-pre-wrap">
-            {log || 'Loading log...'}
+            {log || (job.status === 'processing' ? 'Waiting for log output...' : 'No log available')}
           </pre>
         </div>
       </div>

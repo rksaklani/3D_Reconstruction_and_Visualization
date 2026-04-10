@@ -7,6 +7,7 @@ import logging
 from backend.database import get_database
 from backend.services.minio_service import get_minio_service
 from backend.api.models.upload import UploadResponse
+from backend.pipeline.threaded_pipeline import get_threaded_pipeline
 from datetime import datetime
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 @router.post("/", response_model=UploadResponse)
 async def upload_files(
     job_id: str = Form(..., description="Job ID"),
-    files: List[UploadFile] = File(..., description="Files to upload")
+    files: List[UploadFile] = File(..., description="Files to upload"),
+    auto_start: bool = Form(True, description="Auto-start processing after upload")
 ):
     """
     Upload files for a job.
@@ -24,6 +26,7 @@ async def upload_files(
     Args:
         job_id: Job identifier
         files: List of files to upload
+        auto_start: Automatically start processing after upload (default: True)
         
     Returns:
         Upload confirmation with file details
@@ -90,20 +93,37 @@ async def upload_files(
     # Update job
     input_type = "video" if any(f['filename'].endswith(('.mp4', '.mov', '.avi')) for f in uploaded_files) else "images"
     
+    # Determine status based on auto_start
+    status = "processing" if auto_start else "uploaded"
+    
+    update_data = {
+        "input_files": [f['object_name'] for f in uploaded_files],
+        "num_files": len(uploaded_files),
+        "status": status,
+        "input_type": input_type,
+        "updated_at": datetime.utcnow()
+    }
+    
+    # If auto-starting, set initial processing fields
+    if auto_start:
+        update_data["stage"] = "initializing"
+        update_data["progress"] = 0
+        update_data["started_at"] = datetime.utcnow()
+    
     await db.jobs.update_one(
         {"job_id": job_id},
-        {"$set": {
-            "input_files": [f['object_name'] for f in uploaded_files],
-            "num_files": len(uploaded_files),
-            "status": "uploaded",
-            "input_type": input_type,
-            "updated_at": datetime.utcnow()
-        }}
+        {"$set": update_data}
     )
+    
+    # Auto-start processing if requested
+    if auto_start:
+        pipeline = get_threaded_pipeline()
+        pipeline.start_job(job_id)
+        logger.info(f"Auto-starting processing for job: {job_id}")
     
     return UploadResponse(
         job_id=job_id,
-        status="uploaded",
+        status=status,
         num_files=len(uploaded_files),
         total_size=total_size,
         files=uploaded_files

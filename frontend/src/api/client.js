@@ -18,11 +18,24 @@ console.log('API Base URL:', baseURL)
 export const jobsApi = {
   getJobs: () => api.get('/jobs'),
   getJob: (jobId) => api.get(`/jobs/${jobId}`),
-  getJobLog: (jobId, tail = 6000) => api.get(`/jobs/${jobId}/log?tail=${tail}`),
+  getJobLog: (jobId, tail = 6000) => api.get(`/logs/${jobId}?tail=${tail}`, {
+    headers: { 'Accept': 'text/plain' }
+  }),
   stopJob: (jobId) => api.post(`/process/${jobId}/stop`),
   startProcessing: (jobId) => api.post(`/process/${jobId}/start`),
   createJob: (formData) => api.post('/jobs', formData, {
     headers: { 'Content-Type': 'application/json' }
+  }),
+}
+
+export const reconstructionApi = {
+  getSceneData: (jobId) => api.get(`/reconstruction/${jobId}/scene`),
+  getPointCloud: (jobId, limit = 50000) => api.get(`/reconstruction/${jobId}/points`, {
+    params: { limit }
+  }),
+  getCameras: (jobId) => api.get(`/reconstruction/${jobId}/cameras`),
+  downloadPly: (jobId) => api.get(`/reconstruction/${jobId}/download/ply`, {
+    responseType: 'blob'
   }),
 }
 

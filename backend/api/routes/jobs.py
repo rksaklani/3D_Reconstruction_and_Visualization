@@ -50,6 +50,7 @@ async def create_job(job_data: JobCreate):
         "status": "created",
         "stage": None,
         "progress": 0.0,
+        "pid": None,  # Process ID for subprocess control
         "input_files": [],
         "input_type": None,
         "num_files": 0,

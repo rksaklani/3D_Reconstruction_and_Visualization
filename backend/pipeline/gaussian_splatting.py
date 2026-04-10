@@ -188,7 +188,7 @@ class GaussianSplattingTrainer:
         checkpoint_path: Optional[str] = None
     ) -> Dict:
         """
-        Train Gaussian Splatting model.
+        Train Gaussian Splatting model using conda environment.
         
         Args:
             source_path: Path to source data (COLMAP format)
@@ -201,10 +201,10 @@ class GaussianSplattingTrainer:
         Returns:
             Training statistics
         """
-        # Prepare training command
+        # Prepare training command using conda environment
         cmd = [
-            "python3",
-            str(self.train_script),
+            "conda", "run", "-n", "gaussian_splatting",
+            "python", str(self.train_script),
             "-s", source_path,
             "-m", model_path
         ]
@@ -235,13 +235,12 @@ class GaussianSplattingTrainer:
         if checkpoint_path:
             cmd.extend(["--start_checkpoint", checkpoint_path])
         
-        logger.info(f"Starting Gaussian Splatting training: {' '.join(cmd)}")
+        logger.info(f"Starting Gaussian Splatting training with conda env: {' '.join(cmd)}")
         
         try:
             # Run training
             result = subprocess.run(
                 cmd,
-                cwd=str(self.gs_path),
                 capture_output=True,
                 text=True,
                 timeout=3600 * 4  # 4 hour timeout

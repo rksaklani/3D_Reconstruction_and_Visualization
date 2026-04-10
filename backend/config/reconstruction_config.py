@@ -22,7 +22,7 @@ class ReconstructionConfig:
     VOCAB_TREE_PATH: str = os.getenv('VOCAB_TREE_PATH', '/path/to/vocab_tree.bin')
     
     # COLMAP paths
-    COLMAP_EXECUTABLE: str = os.getenv('COLMAP_EXECUTABLE', '/usr/local/bin/colmap')
+    COLMAP_EXECUTABLE: str = os.getenv('COLMAP_EXECUTABLE', '/usr/bin/colmap')
     COLMAP_DATABASE: str = os.getenv('COLMAP_DATABASE', 'database.db')
     
     # Gaussian Splatting training
