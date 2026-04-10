@@ -16,8 +16,9 @@ const api = axios.create({
 console.log('API Base URL:', baseURL)
 
 export const jobsApi = {
-  getJobs: () => api.get('/jobs'),
+  getJobs: (params = {}) => api.get('/jobs', { params }),
   getJob: (jobId) => api.get(`/jobs/${jobId}`),
+  getJobStats: (jobId) => api.get(`/jobs/${jobId}/stats`),
   getJobLog: (jobId, tail = 6000) => api.get(`/logs/${jobId}?tail=${tail}`, {
     headers: { 'Accept': 'text/plain' }
   }),
@@ -26,6 +27,43 @@ export const jobsApi = {
   createJob: (formData) => api.post('/jobs', formData, {
     headers: { 'Content-Type': 'application/json' }
   }),
+  updateJob: (jobId, data) => api.patch(`/jobs/${jobId}`, data),
+  deleteJob: (jobId) => api.delete(`/jobs/${jobId}`),
+}
+
+export const statsApi = {
+  getDashboardStats: async () => {
+    // Fetch all jobs to calculate stats
+    const response = await api.get('/jobs', { params: { limit: 100 } })
+    const jobs = response.data.jobs || []
+    
+    // Calculate stats
+    const totalProjects = jobs.length
+    const activeJobs = jobs.filter(j => j.status === 'processing' || j.status === 'queued').length
+    const completedJobs = jobs.filter(j => j.status === 'completed').length
+    
+    // Calculate storage (sum of all job files)
+    let totalStorage = 0
+    jobs.forEach(job => {
+      if (job.stats && job.stats.total_size) {
+        totalStorage += job.stats.total_size
+      }
+    })
+    
+    return {
+      totalProjects,
+      activeJobs,
+      completedJobs,
+      totalModels: completedJobs,
+      storageUsed: totalStorage,
+      jobs
+    }
+  },
+  
+  getRecentProjects: async (limit = 5) => {
+    const response = await api.get('/jobs', { params: { limit } })
+    return response.data.jobs || []
+  }
 }
 
 export const reconstructionApi = {

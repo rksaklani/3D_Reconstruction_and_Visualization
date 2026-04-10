@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Square, Eye, Trash2 } from 'lucide-react';
+import { jobsApi } from '../api/client';
 
 const PIPELINE_STAGES = [
   'Input Validation',
@@ -19,6 +21,46 @@ export const Processing = () => {
   const [jobStatus, setJobStatus] = useState(null);
   const [error, setError] = useState(null);
   const [ws, setWs] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const handleStop = async () => {
+    if (!confirm('Are you sure you want to stop this job?')) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      await jobsApi.stopJob(jobId);
+      setTimeout(() => {
+        pollStatus();
+        setActionLoading(false);
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to stop job:', err);
+      alert('Failed to stop job');
+      setActionLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      await jobsApi.deleteJob(jobId);
+      navigate('/app/jobs');
+    } catch (err) {
+      console.error('Failed to delete job:', err);
+      alert('Failed to delete job');
+      setActionLoading(false);
+    }
+  };
+
+  const handleView = () => {
+    navigate(`/app/viewer/${jobId}`);
+  };
 
   useEffect(() => {
     if (!jobId) return;
@@ -128,14 +170,50 @@ export const Processing = () => {
         <div className="bg-white rounded-lg p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold">Job ID: {jobId}</h2>
-            <span className={`px-4 py-2 rounded-full text-sm font-semibold ${
-              jobStatus.status === 'completed' ? 'bg-green-100 text-green-800' :
-              jobStatus.status === 'failed' ? 'bg-red-100 text-red-800' :
-              jobStatus.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-              'bg-gray-100 text-gray-800'
-            }`}>
-              {jobStatus.status.toUpperCase()}
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className={`px-4 py-2 rounded-full text-sm font-semibold ${
+                jobStatus.status === 'completed' ? 'bg-green-100 text-green-800' :
+                jobStatus.status === 'failed' ? 'bg-red-100 text-red-800' :
+                jobStatus.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                'bg-gray-100 text-gray-800'
+              }`}>
+                {jobStatus.status.toUpperCase()}
+              </span>
+              
+              {/* Action Buttons */}
+              {jobStatus.status === 'processing' && (
+                <button
+                  onClick={handleStop}
+                  disabled={actionLoading}
+                  className="flex items-center space-x-1 px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
+                  title="Stop Processing"
+                >
+                  <Square className="w-4 h-4" />
+                  <span>Stop</span>
+                </button>
+              )}
+              
+              {jobStatus.status === 'completed' && (
+                <button
+                  onClick={handleView}
+                  className="flex items-center space-x-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  title="View 3D Model"
+                >
+                  <Eye className="w-4 h-4" />
+                  <span>View 3D</span>
+                </button>
+              )}
+              
+              <button
+                onClick={handleDelete}
+                disabled={actionLoading}
+                className="flex items-center space-x-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                title="Delete Job"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </button>
+            </div>
           </div>
 
           <div className="mb-6">

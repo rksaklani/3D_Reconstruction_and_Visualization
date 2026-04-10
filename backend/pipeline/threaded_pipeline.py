@@ -157,6 +157,16 @@ class ThreadedPipeline:
             logger.info(f"Job {job_id}: Stage 5 - Export")
             export_result = self._stage_export(job, sfm_result, ai_result, gaussian_result)
             
+            # Log output files status
+            db = get_sync_database()
+            job_check = db.jobs.find_one({"job_id": job_id})
+            if job_check and 'output_files' in job_check:
+                logger.info(f"Job {job_id}: output_files set: {job_check['output_files'].keys()}")
+                if 'sparse_warning' in job_check['output_files']:
+                    logger.warning(f"Job {job_id}: ⚠️ No 3D reconstruction data - sparse_warning flag set")
+            else:
+                logger.error(f"Job {job_id}: output_files NOT set after export!")
+            
             # Save processing logs to MinIO
             self._save_logs_to_minio(job_id, job['user_id'])
             
@@ -483,16 +493,50 @@ class ThreadedPipeline:
         uploaded_files = {}
         
         # Upload sparse reconstruction to storage/processed/{job_id}/sparse/
+        sparse_uploaded = False
         if sfm_result.get('sparse_dir') and Path(sfm_result['sparse_dir']).exists():
             sparse_dir = Path(sfm_result['sparse_dir'])
-            for file in sparse_dir.rglob('*'):
-                if file.is_file():
-                    rel_path = file.relative_to(sparse_dir)
-                    object_name = f"storage/processed/{job_id}/sparse/{rel_path}"
-                    with open(file, 'rb') as f:
-                        self.minio.upload_data(f.read(), object_name)
-            uploaded_files['sparse'] = f"storage/processed/{job_id}/sparse/"
-            logger.info(f"Uploaded sparse reconstruction to MinIO")
+            logger.info(f"📁 Checking sparse reconstruction at: {sparse_dir}")
+            uploaded_count = 0
+            
+            # Check if required COLMAP files exist
+            required_files = ['cameras.bin', 'images.bin', 'points3D.bin']
+            missing_files = [f for f in required_files if not (sparse_dir / f).exists()]
+            
+            if missing_files:
+                logger.error(f"❌ Missing required COLMAP files: {missing_files}")
+                logger.error(f"❌ COLMAP reconstruction may have failed - no 3D points generated")
+                logger.error(f"❌ Files in sparse dir: {list(sparse_dir.iterdir())}")
+            else:
+                logger.info(f"✓ All required COLMAP files found: {required_files}")
+                for file in sparse_dir.rglob('*'):
+                    if file.is_file():
+                        rel_path = file.relative_to(sparse_dir)
+                        object_name = f"storage/processed/{job_id}/sparse/{rel_path}"
+                        try:
+                            with open(file, 'rb') as f:
+                                self.minio.upload_data(f.read(), object_name)
+                            uploaded_count += 1
+                            logger.info(f"  ✓ Uploaded {file.name} to {object_name}")
+                        except Exception as e:
+                            logger.error(f"  ❌ Failed to upload {file.name}: {e}")
+                
+                if uploaded_count > 0:
+                    uploaded_files['sparse'] = f"storage/processed/{job_id}/sparse/"
+                    sparse_uploaded = True
+                    logger.info(f"✓ Uploaded {uploaded_count} sparse reconstruction files to MinIO")
+        else:
+            if not sfm_result.get('sparse_dir'):
+                logger.warning(f"⚠️ No sparse_dir in sfm_result")
+            elif not Path(sfm_result['sparse_dir']).exists():
+                logger.warning(f"⚠️ Sparse directory does not exist: {sfm_result.get('sparse_dir')}")
+        
+        # If no sparse files were uploaded, mark this in the job
+        if not sparse_uploaded:
+            logger.error(f"❌ No sparse reconstruction data available - 3D viewer will not work")
+            logger.error(f"❌ Setting sparse_warning flag in output_files")
+            uploaded_files['sparse_warning'] = "No 3D reconstruction data generated"
+
         
         # Upload AI results to storage/processed/{job_id}/ai/
         ai_export = export_dir / "ai_results.json"

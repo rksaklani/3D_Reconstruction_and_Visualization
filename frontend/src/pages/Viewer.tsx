@@ -144,6 +144,8 @@ export const Viewer: React.FC = () => {
       const response = await apiClient.get(`/jobs/${jobId}`);
       const job = response.data;
 
+      console.log('Job data:', job);
+
       if (job.status !== 'completed') {
         setError(`Reconstruction not completed yet (status: ${job.status})`);
         return;
@@ -152,19 +154,25 @@ export const Viewer: React.FC = () => {
       setLoadingStatus('Loading 3D reconstruction...');
       
       // Load Gaussian splats from backend API
-      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
+      console.log('API Base URL:', apiBaseUrl);
+      console.log('Loading from:', `${apiBaseUrl}/reconstruction/${jobId}/points`);
+      
       await sceneLoader.loadFromAPI(apiBaseUrl, jobId);
       
       setLoadingStatus('Scene loaded successfully');
       console.log('Successfully loaded scene from backend');
     } catch (err) {
       console.error('Failed to load scene data:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load scene data');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load scene data';
+      setError(errorMessage);
       
       // Fall back to demo scene
       if (gaussianRendererRef.current) {
         console.log('Falling back to demo scene');
+        setLoadingStatus('Loading demo scene...');
         loadDemoScene(gaussianRendererRef.current);
+        setError(null); // Clear error since we're showing demo
       }
     }
   };
@@ -255,7 +263,7 @@ export const Viewer: React.FC = () => {
     if (!id) return;
     
     try {
-      const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+      const apiBaseUrl = import.meta.env.VITE_API_URL || '/api';
       const response = await fetch(`${apiBaseUrl}/reconstruction/${id}/download/ply`);
       
       if (!response.ok) {

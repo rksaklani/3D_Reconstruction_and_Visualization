@@ -24,6 +24,8 @@ import JobDetail from './pages/JobDetail'
 import AIAnalysis from './pages/dashboard/AIAnalysis'
 import Models from './pages/dashboard/Models'
 import Viewer from './pages/Viewer'
+import ViewerDebug from './pages/ViewerDebug'
+import ApiTest from './pages/ApiTest'
 import Exports from './pages/dashboard/Exports'
 import Storage from './pages/dashboard/Storage'
 import Team from './pages/dashboard/Team'
@@ -73,12 +75,14 @@ function App() {
             <Route path="ai-analysis" element={<AIAnalysis />} />
             <Route path="models" element={<Models />} />
             <Route path="viewer/:id" element={<Viewer />} />
+            <Route path="viewer/:id/debug" element={<ViewerDebug />} />
             <Route path="exports" element={<Exports />} />
             <Route path="storage" element={<Storage />} />
             <Route path="team" element={<Team />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="settings" element={<Settings />} />
             <Route path="help" element={<Help />} />
+            <Route path="api-test" element={<ApiTest />} />
           </Route>
 
           {/* Fallback */}
