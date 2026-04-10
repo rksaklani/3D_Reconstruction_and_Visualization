@@ -1,14 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-
-interface JobStatus {
-  jobId: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
-  currentStage: string;
-  progress: number;
-  estimatedTimeRemaining?: number;
-  error?: string;
-}
 
 const PIPELINE_STAGES = [
   'Input Validation',
@@ -22,12 +13,12 @@ const PIPELINE_STAGES = [
   'Export'
 ];
 
-export const Processing: React.FC = () => {
-  const { jobId } = useParams<{ jobId: string }>();
+export const Processing = () => {
+  const { jobId } = useParams();
   const navigate = useNavigate();
-  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [jobStatus, setJobStatus] = useState(null);
+  const [error, setError] = useState(null);
+  const [ws, setWs] = useState(null);
 
   useEffect(() => {
     if (!jobId) return;
@@ -39,7 +30,7 @@ export const Processing: React.FC = () => {
         if (!response.ok) {
           throw new Error(`Failed to fetch status: ${response.statusText}`);
         }
-        const data: JobStatus = await response.json();
+        const data = await response.json();
         setJobStatus(data);
 
         if (data.status === 'completed') {
@@ -59,7 +50,7 @@ export const Processing: React.FC = () => {
     const websocket = new WebSocket(`ws://${window.location.host}/ws/status/${jobId}`);
     
     websocket.onmessage = (event) => {
-      const data: JobStatus = JSON.parse(event.data);
+      const data = JSON.parse(event.data);
       setJobStatus(data);
 
       if (data.status === 'completed') {
@@ -83,14 +74,14 @@ export const Processing: React.FC = () => {
     };
   }, [jobId, navigate]);
 
-  const formatTime = (seconds: number): string => {
+  const formatTime = (seconds) => {
     if (seconds < 60) return `${Math.round(seconds)}s`;
     const minutes = Math.floor(seconds / 60);
     const secs = Math.round(seconds % 60);
     return `${minutes}m ${secs}s`;
   };
 
-  const getCurrentStageIndex = (): number => {
+  const getCurrentStageIndex = () => {
     if (!jobStatus) return 0;
     return PIPELINE_STAGES.findIndex(stage => 
       stage.toLowerCase() === jobStatus.currentStage.toLowerCase()
