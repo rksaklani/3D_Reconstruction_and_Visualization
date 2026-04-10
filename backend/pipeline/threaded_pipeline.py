@@ -26,6 +26,11 @@ class ThreadedPipeline:
         # Load configuration
         self.config = get_config()
         
+        # Get temp workspace from environment
+        import os
+        self.temp_workspace = os.getenv('TEMP_WORKSPACE', '/tmp/reconstruction_jobs')
+        logger.info(f"Using temp workspace: {self.temp_workspace}")
+        
         # Initialize storage
         self.minio = get_minio_service()
         
@@ -151,6 +156,10 @@ class ThreadedPipeline:
             # Stage 5: Export
             logger.info(f"Job {job_id}: Stage 5 - Export")
             export_result = self._stage_export(job, sfm_result, ai_result, gaussian_result)
+            
+            # Save processing logs to MinIO
+            self._save_logs_to_minio(job_id, job['user_id'])
+            
             self._update_job_status(job_id, "completed", "complete", 1.0)
             
             # Save results
@@ -169,6 +178,12 @@ class ThreadedPipeline:
         except Exception as e:
             logger.error(f"Job failed: {job_id} - {e}")
             logger.error(traceback.format_exc())
+            
+            # Save error logs to MinIO
+            try:
+                self._save_logs_to_minio(job_id, job['user_id'], include_error=True, error_trace=traceback.format_exc())
+            except Exception as log_error:
+                logger.error(f"Failed to save error logs: {log_error}")
             
             self._update_job_status(
                 job_id, "failed", None, None,
@@ -197,7 +212,7 @@ class ThreadedPipeline:
         user_id = job['user_id']
         
         # Create job workspace
-        job_temp_dir = Path(f"/tmp/reconstruction_jobs/{job_id}")
+        job_temp_dir = Path(f"{self.temp_workspace}/{job_id}")
         local_dir = job_temp_dir / "input"
         local_dir.mkdir(parents=True, exist_ok=True)
         
@@ -422,7 +437,7 @@ class ThreadedPipeline:
         user_id = job['user_id']
         
         # Create export directory
-        job_temp_dir = Path(f"/tmp/reconstruction_jobs/{job_id}")
+        job_temp_dir = Path(f"{self.temp_workspace}/{job_id}")
         export_dir = job_temp_dir / "export"
         export_dir.mkdir(parents=True, exist_ok=True)
         
@@ -464,33 +479,50 @@ class ThreadedPipeline:
             json.dump(summary, f, indent=2)
         export_files['summary'] = str(summary_export)
         
-        # Upload exports to MinIO
+        # Upload exports to MinIO with proper storage structure
         uploaded_files = {}
-        for file_type, file_path in export_files.items():
-            file_path_obj = Path(file_path)
-            
-            if file_path_obj.is_file():
-                # Upload single file
-                object_name = f"{user_id}/{job_id}/output/{file_path_obj.name}"
-                with open(file_path_obj, 'rb') as f:
+        
+        # Upload sparse reconstruction to storage/processed/{job_id}/sparse/
+        if sfm_result.get('sparse_dir') and Path(sfm_result['sparse_dir']).exists():
+            sparse_dir = Path(sfm_result['sparse_dir'])
+            for file in sparse_dir.rglob('*'):
+                if file.is_file():
+                    rel_path = file.relative_to(sparse_dir)
+                    object_name = f"storage/processed/{job_id}/sparse/{rel_path}"
+                    with open(file, 'rb') as f:
+                        self.minio.upload_data(f.read(), object_name)
+            uploaded_files['sparse'] = f"storage/processed/{job_id}/sparse/"
+            logger.info(f"Uploaded sparse reconstruction to MinIO")
+        
+        # Upload AI results to storage/processed/{job_id}/ai/
+        ai_export = export_dir / "ai_results.json"
+        with open(ai_export, 'w') as f:
+            json.dump(ai_result, f, indent=2)
+        object_name = f"storage/processed/{job_id}/ai/ai_results.json"
+        with open(ai_export, 'rb') as f:
+            self.minio.upload_data(f.read(), object_name)
+        uploaded_files['ai_results'] = object_name
+        logger.info(f"Uploaded AI results to MinIO")
+        
+        # Upload reconstruction summary to storage/processed/{job_id}/
+        summary_export = export_dir / "reconstruction_summary.json"
+        with open(summary_export, 'w') as f:
+            json.dump(summary, f, indent=2)
+        object_name = f"storage/processed/{job_id}/reconstruction_summary.json"
+        with open(summary_export, 'rb') as f:
+            self.minio.upload_data(f.read(), object_name)
+        uploaded_files['summary'] = object_name
+        logger.info(f"Uploaded reconstruction summary to MinIO")
+        
+        # If Gaussian splats exist, upload to storage/models/splats/{job_id}/
+        if gaussian_result.get('splat_file'):
+            splat_path = Path(gaussian_result['splat_file'])
+            if splat_path.exists():
+                object_name = f"storage/models/splats/{job_id}/{splat_path.name}"
+                with open(splat_path, 'rb') as f:
                     self.minio.upload_data(f.read(), object_name)
-                uploaded_files[file_type] = object_name
-                
-            elif file_path_obj.is_dir():
-                # Upload directory contents
-                uploaded_count = 0
-                for file in file_path_obj.rglob('*'):
-                    if file.is_file():
-                        # Create relative path for MinIO
-                        rel_path = file.relative_to(export_dir)
-                        object_name = f"{user_id}/{job_id}/output/{rel_path}"
-                        
-                        with open(file, 'rb') as f:
-                            self.minio.upload_data(f.read(), object_name)
-                        uploaded_count += 1
-                
-                if uploaded_count > 0:
-                    uploaded_files[file_type] = f"{user_id}/{job_id}/output/{file_path_obj.name}/ ({uploaded_count} files)"
+                uploaded_files['splat'] = object_name
+                logger.info(f"Uploaded Gaussian splat to MinIO")
         
         # Update job with output files
         db = get_sync_database()
@@ -555,6 +587,64 @@ class ThreadedPipeline:
             'cleanup': 'completed'
         }
     
+    def _save_logs_to_minio(self, job_id: str, user_id: str, include_error: bool = False, error_trace: str = None):
+        """
+        Save processing logs to MinIO.
+        
+        Args:
+            job_id: Job identifier
+            user_id: User identifier
+            include_error: Whether to include error information
+            error_trace: Error traceback if available
+        """
+        try:
+            db = get_sync_database()
+            job = db.jobs.find_one({"job_id": job_id})
+            
+            # Build log content
+            log_lines = []
+            log_lines.append(f"Job ID: {job_id}")
+            log_lines.append(f"User ID: {user_id}")
+            log_lines.append(f"Status: {job['status']}")
+            log_lines.append(f"Created: {job['created_at']}")
+            log_lines.append(f"Started: {job.get('started_at', 'N/A')}")
+            log_lines.append(f"Completed: {job.get('completed_at', 'N/A')}")
+            log_lines.append("="*60)
+            log_lines.append("")
+            
+            # Add stage information
+            if job.get('stats'):
+                log_lines.append("Statistics:")
+                for key, value in job['stats'].items():
+                    log_lines.append(f"  {key}: {value}")
+                log_lines.append("")
+            
+            if include_error and error_trace:
+                log_lines.append("ERROR TRACE:")
+                log_lines.append("="*60)
+                log_lines.append(error_trace)
+            
+            log_content = "\n".join(log_lines)
+            
+            # Upload to MinIO: storage/processed/{job_id}/logs/processing.log
+            object_name = f"storage/processed/{job_id}/logs/processing.log"
+            self.minio.upload_data(
+                log_content.encode('utf-8'),
+                object_name,
+                content_type="text/plain"
+            )
+            
+            # Update job with log reference
+            db.jobs.update_one(
+                {"job_id": job_id},
+                {"$set": {"log_file": object_name}}
+            )
+            
+            logger.info(f"Saved logs to MinIO: {object_name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save logs to MinIO: {e}")
+
     def _update_job_status(
         self,
         job_id: str,

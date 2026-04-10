@@ -215,10 +215,10 @@ async def get_scene_data(job_id: str):
     try:
         minio = get_minio_service()
         
-        # Load COLMAP binary files from MinIO
-        cameras_data = minio.download_data(f"{job_id}/export/sparse/cameras.bin")
-        images_data = minio.download_data(f"{job_id}/export/sparse/images.bin")
-        points_data = minio.download_data(f"{job_id}/export/sparse/points3D.bin")
+        # Load COLMAP binary files from MinIO: storage/processed/{job_id}/sparse/
+        cameras_data = minio.download_data(f"storage/processed/{job_id}/sparse/cameras.bin")
+        images_data = minio.download_data(f"storage/processed/{job_id}/sparse/images.bin")
+        points_data = minio.download_data(f"storage/processed/{job_id}/sparse/points3D.bin")
         
         # Parse binary data
         cameras = parse_colmap_cameras_bin(cameras_data)
@@ -273,8 +273,8 @@ async def get_point_cloud(job_id: str, limit: int = 50000):
     try:
         minio = get_minio_service()
         
-        # Load points3D.bin
-        points_data = minio.download_data(f"{job_id}/export/sparse/points3D.bin")
+        # Load points3D.bin from storage/processed/{job_id}/sparse/
+        points_data = minio.download_data(f"storage/processed/{job_id}/sparse/points3D.bin")
         points = parse_colmap_points3d_bin(points_data)
         
         # Limit number of points
@@ -337,9 +337,9 @@ async def get_cameras(job_id: str):
     try:
         minio = get_minio_service()
         
-        # Load camera and image data
-        cameras_data = minio.download_data(f"{job_id}/export/sparse/cameras.bin")
-        images_data = minio.download_data(f"{job_id}/export/sparse/images.bin")
+        # Load camera and image data from storage/processed/{job_id}/sparse/
+        cameras_data = minio.download_data(f"storage/processed/{job_id}/sparse/cameras.bin")
+        images_data = minio.download_data(f"storage/processed/{job_id}/sparse/images.bin")
         
         cameras = parse_colmap_cameras_bin(cameras_data)
         images = parse_colmap_images_bin(images_data)
@@ -385,8 +385,8 @@ async def download_ply(job_id: str):
     try:
         minio = get_minio_service()
         
-        # Load points
-        points_data = minio.download_data(f"{job_id}/export/sparse/points3D.bin")
+        # Load points from storage/processed/{job_id}/sparse/
+        points_data = minio.download_data(f"storage/processed/{job_id}/sparse/points3D.bin")
         points = parse_colmap_points3d_bin(points_data)
         
         # Generate PLY file

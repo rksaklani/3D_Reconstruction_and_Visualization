@@ -65,8 +65,8 @@ async def upload_files(
         file_size = len(content)
         total_size += file_size
         
-        # Upload to MinIO
-        object_name = f"{job['user_id']}/{job_id}/input/{file.filename}"
+        # Upload to MinIO with storage structure
+        object_name = f"storage/uploads/{job['user_id']}/{job_id}/{file.filename}"
         
         try:
             minio.upload_data(
